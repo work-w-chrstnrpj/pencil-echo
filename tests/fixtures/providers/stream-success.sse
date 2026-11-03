@@ -1,0 +1,14 @@
+: synthetic fixture, not a captured provider response
+
+data: {"choices":[{"index":0,"delta":{"content":"{\"version\":1,\"operations\":[{\"op\":\"add_ob"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"ject\",\"type\":\"markdown\",\"source\":\"x = 4\",\"placemen"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"t\":\"right_of_scope\",\"frame\":null}],\"message\":null}"},"finish_reason":null}]}
+
+data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":30,"total_tokens":42}}
+
+data: [DONE]
+

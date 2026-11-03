@@ -1,0 +1,6 @@
+data: {"candidates":[{"index":0,"content":{"parts":[{"thought":true,"text":"Synthetic reasoning must not be emitted."},{"text":"{\"version\":1,\"operations\":[{\"op\":\"add_object\",\"type\":\"latex\""}]}}]}
+
+data: {"candidates":[{"index":0,"content":{"parts":[{"text":",\"source\":\"x=4\",\"placement\":\"right_of_scope\",\"frame\":null}],\"message\":null}"}]},"finishReason":"STOP"}]}
+
+data: {"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":30,"totalTokenCount":42}}
+
