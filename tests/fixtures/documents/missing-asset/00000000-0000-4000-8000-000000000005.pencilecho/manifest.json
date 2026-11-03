@@ -1,0 +1,10 @@
+{
+  "appVersion" : "fixture",
+  "createdAt" : "2026-11-03T12:00:00.000Z",
+  "id" : "00000000-0000-4000-8000-000000000005",
+  "revision" : 2,
+  "schemaVersion" : 1,
+  "title" : "Missing asset",
+  "type" : "notebook",
+  "updatedAt" : "2026-11-03T12:30:00.000Z"
+}

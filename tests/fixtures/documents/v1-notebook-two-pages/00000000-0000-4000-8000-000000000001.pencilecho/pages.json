@@ -1,0 +1,26 @@
+{
+  "pages" : [
+    {
+      "background" : {
+        "spacing" : 24,
+        "style" : "lined"
+      },
+      "id" : "00000000-0000-4000-8000-000000000011",
+      "size" : {
+        "height" : 842,
+        "width" : 595
+      }
+    },
+    {
+      "background" : {
+        "spacing" : null,
+        "style" : "blank"
+      },
+      "id" : "00000000-0000-4000-8000-000000000012",
+      "size" : {
+        "height" : 842,
+        "width" : 595
+      }
+    }
+  ]
+}

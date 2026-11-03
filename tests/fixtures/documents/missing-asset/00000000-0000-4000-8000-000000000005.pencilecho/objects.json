@@ -1,0 +1,23 @@
+{
+  "objects" : [
+    {
+      "assetRefs" : [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png"
+      ],
+      "createdAt" : "2026-11-03T12:00:00.000Z",
+      "createdBy" : "user",
+      "frame" : {
+        "height" : 120,
+        "width" : 120,
+        "x" : 40,
+        "y" : 40
+      },
+      "id" : "00000000-0000-4000-8000-000000000025",
+      "pageId" : "00000000-0000-4000-8000-000000000016",
+      "source" : "",
+      "type" : "image",
+      "updatedAt" : "2026-11-03T12:30:00.000Z",
+      "zIndex" : 0
+    }
+  ]
+}

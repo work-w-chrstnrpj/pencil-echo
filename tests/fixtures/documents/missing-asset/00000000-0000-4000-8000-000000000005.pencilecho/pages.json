@@ -1,0 +1,15 @@
+{
+  "pages" : [
+    {
+      "background" : {
+        "spacing" : null,
+        "style" : "blank"
+      },
+      "id" : "00000000-0000-4000-8000-000000000016",
+      "size" : {
+        "height" : 842,
+        "width" : 595
+      }
+    }
+  ]
+}
