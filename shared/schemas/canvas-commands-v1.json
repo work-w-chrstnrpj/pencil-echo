@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pencil-echo/canvas-commands-v1",
+  "title": "Pencil Echo canvas commands (version 2)",
+  "description": "Model answer for one AI request. Spec: docs/api/canvas-commands-v1.md. The app's validator is authoritative; limits in descriptions are enforced there.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "operations",
+    "message"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        2
+      ],
+      "description": "Version 2 adds plot objects and draw_ink. The app still accepts version 1 answers without them."
+    },
+    "operations": {
+      "type": "array",
+      "description": "1 to 20 operations, applied together as one undo step.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "description": "Add a new editable object to the captured page.",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "type",
+              "source",
+              "placement",
+              "frame"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "add_object"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "markdown",
+                  "latex",
+                  "plot"
+                ],
+                "description": "text: plain text, written in a handwriting style. markdown: Markdown with $...$ and $$...$$ math. latex: one standalone formula without $ delimiters. plot: a function graph; source is lines 'y = <expression in x>' (1 to 4), optional 'x: <min> .. <max>', 'y: <min> .. <max>' and 'title: <text>'."
+              },
+              "source": {
+                "type": "string",
+                "description": "Editable content, 1 byte to 20 KB UTF-8, not only whitespace."
+              },
+              "placement": {
+                "type": "string",
+                "enum": [
+                  "right_of_scope",
+                  "below_scope",
+                  "at_frame"
+                ],
+                "description": "Where to place the object relative to the captured region. at_frame requires frame; the others require frame null."
+              },
+              "frame": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Page coordinates in points, origin top-left. Only with placement at_frame.",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number",
+                    "description": "At least 8, at most the page width."
+                  },
+                  "height": {
+                    "type": "number",
+                    "description": "At least 8, at most the page height. A starting size; the object may grow to fit."
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Replace the source of an existing object. Only when the request allows replacement.",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "objectId",
+              "source"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "edit_object"
+                ]
+              },
+              "objectId": {
+                "type": "string",
+                "description": "UUID of an object inside the captured region."
+              },
+              "source": {
+                "type": "string",
+                "description": "1 byte to 20 KB UTF-8."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Delete an existing object. Only when the request allows replacement.",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "objectId"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "delete_object"
+                ]
+              },
+              "objectId": {
+                "type": "string",
+                "description": "UUID of an object inside the captured region."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Draw native ink: a sketch, picture, diagram, arrow or annotation. Points are in a local box of width x height, origin top-left, y down; the app scales the box into place.",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "width",
+              "height",
+              "strokes",
+              "placement",
+              "frame"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "draw_ink"
+                ]
+              },
+              "width": {
+                "type": "number",
+                "description": "Local box width, 16 to 2000."
+              },
+              "height": {
+                "type": "number",
+                "description": "Local box height, 16 to 2000."
+              },
+              "strokes": {
+                "type": "array",
+                "description": "1 to 64 strokes, at most 2048 points in all.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "points",
+                    "closed",
+                    "color",
+                    "size"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "line",
+                        "polyline",
+                        "smooth",
+                        "ellipse"
+                      ],
+                      "description": "line: 2 points. polyline: straight segments. smooth: a curve through the points. ellipse: 2 points, opposite corners of its bounding box."
+                    },
+                    "points": {
+                      "type": "array",
+                      "description": "[x, y] pairs inside the local box; 2 to 128.",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "closed": {
+                      "type": "boolean",
+                      "description": "Joins the last point to the first."
+                    },
+                    "color": {
+                      "type": "string",
+                      "enum": [
+                        "black",
+                        "gray",
+                        "blue",
+                        "red",
+                        "green",
+                        "orange",
+                        "purple",
+                        "brown",
+                        "yellow",
+                        "pink"
+                      ]
+                    },
+                    "size": {
+                      "type": "number",
+                      "description": "Pen width in page points, 1 to 24; about 3 for outlines."
+                    }
+                  }
+                }
+              },
+              "placement": {
+                "type": "string",
+                "enum": [
+                  "right_of_scope",
+                  "below_scope",
+                  "at_frame"
+                ],
+                "description": "at_frame requires frame and may overlap existing ink, for annotations; the others require frame null."
+              },
+              "frame": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Page coordinates in points, origin top-left. Only with placement at_frame.",
+                "additionalProperties": false,
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number",
+                    "description": "At least 8, at most the page width."
+                  },
+                  "height": {
+                    "type": "number",
+                    "description": "At least 8, at most the page height. A starting size; the object may grow to fit."
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "message": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional chat text for the conversation, at most 4 KB. Never placed on the page."
+    }
+  }
+}
