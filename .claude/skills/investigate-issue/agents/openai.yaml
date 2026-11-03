@@ -1,0 +1,4 @@
+interface:
+  display_name: "Investigate Issue"
+  short_description: "Evidence-driven incident investigation"
+  default_prompt: "Use $investigate-issue to analyze this issue report and identify the most likely cause from evidence."

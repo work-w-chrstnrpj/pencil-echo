@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+vendor/
+third_party/
+
+# Build outputs
+dist/
+build/
+out/
+target/
+
+# Test and coverage
+coverage/
+.nyc_output/
+.cache/
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE and editor directories
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Generated analysis outputs
+graphify-out/
+.graphify/
+.ai/generated/graphify/
+.understand-anything/intermediate/
+.understand-anything/diff-overlay.json
+repomix-output.*
+
+# Xcode local state and build products
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcresult/
+
+# Upstream reference clone (separate git repository; never edited, see AGENTS.md)
+inspiration/

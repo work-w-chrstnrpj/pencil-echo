@@ -1,0 +1,210 @@
+{
+  "$schema": "./preset.schema.json",
+  "name": "ai-project-structure-template",
+  "version": "1.0.0",
+  "defaultProfile": "fullstack",
+  "providers": [
+    "cursor",
+    "antigravity",
+    "claude",
+    "codex",
+    "opencode"
+  ],
+  "profiles": {
+    "fullstack": {
+      "description": "Fullstack development preset: Software Engineer, Frontend, Backend, Architect, SQA, and Docs with core SDLC skills",
+      "roles": [
+        "software-engineer",
+        "frontend-ui-ux-developer",
+        "backend-database-engineer",
+        "system-architect",
+        "sqa-engineer",
+        "technical-documentation-specialist"
+      ],
+      "skills": [
+        "plan-code-change",
+        "execute-code-change",
+        "code-review",
+        "use-context-tools",
+        "write-automated-test-cases",
+        "create-manual-test-cases",
+        "execute-manual-test-cases",
+        "update-docs"
+      ],
+      "overlays": [
+        "mentor",
+        "coach"
+      ],
+      "workflows": [
+        "feature-delivery",
+        "bugfix-delivery",
+        "refactor-delivery"
+      ]
+    },
+    "general": {
+      "description": "General coding and development preset: Software Engineer and System Architect with code, review, and plan skills",
+      "roles": [
+        "software-engineer",
+        "system-architect"
+      ],
+      "skills": [
+        "ask-repo-question",
+        "plan-code-change",
+        "execute-code-change",
+        "code-review",
+        "use-context-tools"
+      ],
+      "overlays": [
+        "mentor",
+        "coach"
+      ],
+      "workflows": [
+        "feature-delivery",
+        "bugfix-delivery"
+      ]
+    },
+    "qa": {
+      "description": "SQA and test engineering preset: SQA Engineer with manual/automated testing, RCA, and release check skills",
+      "roles": [
+        "sqa-engineer"
+      ],
+      "skills": [
+        "create-manual-test-cases",
+        "execute-manual-test-cases",
+        "write-automated-test-cases",
+        "investigate-issue",
+        "generate-rca",
+        "release-check"
+      ],
+      "overlays": [
+        "coach"
+      ],
+      "workflows": [
+        "investigation-to-rca",
+        "release-readiness"
+      ]
+    },
+    "architecture": {
+      "description": "Architecture and system design preset: System Architect and Security Engineer with planning and investigation",
+      "roles": [
+        "system-architect",
+        "security-engineer"
+      ],
+      "skills": [
+        "ask-repo-question",
+        "plan-code-change",
+        "investigate-issue",
+        "use-context-tools",
+        "update-docs"
+      ],
+      "overlays": [
+        "mentor",
+        "coach"
+      ],
+      "workflows": [
+        "feature-delivery",
+        "refactor-delivery"
+      ]
+    },
+    "docs": {
+      "description": "Technical documentation preset: Technical Documentation Specialist with documentation update workflows",
+      "roles": [
+        "technical-documentation-specialist"
+      ],
+      "skills": [
+        "ask-repo-question",
+        "update-docs"
+      ],
+      "overlays": [
+        "mentor"
+      ],
+      "workflows": []
+    },
+    "all": {
+      "description": "Complete suite: all 9 roles, all 13 skills, all overlays, and all multi-role workflows",
+      "roles": [
+        "software-engineer",
+        "system-architect",
+        "product-planning-manager",
+        "frontend-ui-ux-developer",
+        "backend-database-engineer",
+        "devops-engineer",
+        "security-engineer",
+        "sqa-engineer",
+        "technical-documentation-specialist"
+      ],
+      "skills": [
+        "ask-repo-question",
+        "code-review",
+        "create-manual-test-cases",
+        "execute-code-change",
+        "execute-manual-test-cases",
+        "generate-rca",
+        "investigate-issue",
+        "plan-code-change",
+        "release-check",
+        "sync-ai-adapters",
+        "update-docs",
+        "use-context-tools",
+        "write-automated-test-cases"
+      ],
+      "overlays": [
+        "coach",
+        "mentor"
+      ],
+      "workflows": [
+        "bugfix-delivery",
+        "chore-delivery",
+        "feature-delivery",
+        "investigation-to-rca",
+        "refactor-delivery",
+        "release-readiness"
+      ]
+    }
+  },
+  "contextRules": {
+    "requiredCore": [
+      {
+        "file": "AGENTS.md",
+        "checks": [
+          { "pattern": "\\[State the project goal here\\.\\]", "invert": true, "message": "Project goal not set in AGENTS.md" },
+          { "pattern": "\\[Runtime or framework\\]", "invert": true, "message": "Tech stack not specified in AGENTS.md" }
+        ]
+      },
+      {
+        "file": "docs/tdd/tdd.md",
+        "checks": [
+          { "pattern": "> Status: NOT_STARTED", "invert": true, "message": "docs/tdd/tdd.md is NOT_STARTED" }
+        ]
+      },
+      {
+        "file": "docs/project-structure/project-structure.md",
+        "checks": [
+          { "pattern": "> Status: NOT_STARTED", "invert": true, "message": "docs/project-structure/project-structure.md is NOT_STARTED" }
+        ]
+      }
+    ],
+    "conditionalTasks": {
+      "api": {
+        "file": "docs/api/api-specification.md",
+        "name": "API specification",
+        "roles": ["backend-database-engineer", "software-engineer"]
+      },
+      "database": {
+        "file": "docs/database/data-model.md",
+        "name": "Data model specification",
+        "roles": ["backend-database-engineer"]
+      },
+      "deployment": {
+        "file": "docs/deployment/deployment.md",
+        "name": "Deployment configuration",
+        "roles": ["devops-engineer"]
+      },
+      "testing": {
+        "file": "docs/testing/test-specification.md",
+        "name": "Testing specification",
+        "roles": ["sqa-engineer"]
+      }
+    }
+  }
+}

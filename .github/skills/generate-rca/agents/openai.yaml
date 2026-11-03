@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate RCA"
+  short_description: "Create RCA markdown and PDF reports"
+  default_prompt: "Use $generate-rca to turn this completed investigation into an RCA markdown report and PDF."

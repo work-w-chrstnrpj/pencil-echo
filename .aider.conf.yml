@@ -1,0 +1,22 @@
+# Generic project-level Aider config.
+# Replace placeholder commands per project.
+
+map-tokens: 4096
+map-refresh: auto
+
+read:
+  - AGENTS.md
+  - CONVENTIONS.md
+  - .agents/tools/context-policy.md
+
+auto-commits: false
+dirty-commits: false
+show-diffs: true
+
+lint-cmd: "<project-lint-command>"
+test-cmd: "<project-test-command>"
+
+auto-lint: true
+auto-test: false
+
+analytics: false

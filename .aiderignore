@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+vendor/
+third_party/
+
+# Build outputs
+dist/
+build/
+out/
+target/
+coverage/
+.cache/
+.tmp/
+temp/
+
+# Secrets and local env
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.crt
+
+# Generated AI artifacts
+graphify-out/
+.graphify/
+.ai/generated/graphify/
+.understand-anything/intermediate/
+.understand-anything/diff-overlay.json
+repomix-output.*
+
+# Large binary/media files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.mp4
+*.mov
+*.zip
+*.tar
+*.gz

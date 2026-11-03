@@ -1,0 +1,4 @@
+interface:
+  display_name: "Execute Manual Test Cases"
+  short_description: "Execute manual QA test cases from a file."
+  default_prompt: "Use this skill to execute the manual test cases in the named file against the named project context or setup, then report results and evidence."

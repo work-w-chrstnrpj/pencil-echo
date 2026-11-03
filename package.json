@@ -1,0 +1,34 @@
+{
+  "name": "ai-project-structure-template",
+  "version": "1.0.0",
+  "description": "Token-efficient, portable AI agent architecture and preset generator for Cursor, Antigravity, Claude Code, Codex, and OpenCode",
+  "type": "module",
+  "main": "./lib/index.mjs",
+  "bin": {
+    "create-preset": "./bin/create-preset.mjs",
+    "ai-preset": "./bin/create-preset.mjs"
+  },
+  "scripts": {
+    "create-preset": "node ./bin/create-preset.mjs",
+    "sync": "node ./bin/create-preset.mjs sync",
+    "validate": "node ./bin/create-preset.mjs validate",
+    "measure": "node ./bin/create-preset.mjs measure",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "cursor",
+    "claude-code",
+    "codex",
+    "opencode",
+    "antigravity",
+    "presets",
+    "prompts"
+  ],
+  "author": "",
+  "license": "MIT"
+}
