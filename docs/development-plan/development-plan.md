@@ -42,6 +42,12 @@ Ticket files live in `tickets/`. Owner decisions: signing with a free Apple ID P
 | [011 Markdown and LaTeX objects](../../tickets/011-editable-markdown-and-latex-objects.md) | PE-002 | Codex (resolved on simulator; physical acceptance pending) | 004; 008 integration |
 | [012 OpenAI-compatible presets and settings](../../tickets/012-openai-compatible-providers-and-settings.md) | PE-002 | Claude (in progress: owner real-provider runs pending) | 007 |
 | [013 Anthropic and Gemini native adapters](../../tickets/013-anthropic-and-gemini-native-adapters.md) | PE-002 | Codex (implemented and fixture-verified; owner live acceptance pending) | 007, 012 |
+| [014 Auto Ask on pause and inline answers](../../tickets/014-auto-ask-on-pause-and-inline-answers.md) | PE-002 | Claude (simulator verified; owner A16 + real provider pending) | 010 |
+| [015 Full PencilKit tool set](../../tickets/015-full-pencilkit-tool-set.md) | PE-001 | Claude (simulator verified; owner A16 pending) | 008 |
+| [016 Visual answers: plots and drawings](../../tickets/016-visual-answers-plots-and-drawings.md) | PE-003 | Claude (fixture-tested, installed on A16; real provider pending) | 006, 010, 014 |
+| [017 Pen gestures and context capture](../../tickets/017-pen-gestures-and-context-capture.md) | PE-003 | Unassigned (open) | 010, 014 |
+| [018 Diagram drawing primitives](../../tickets/018-diagram-drawing-primitives.md) | PE-003 | Unassigned (open) | 016 |
+| [019 Precise ink on existing work](../../tickets/019-precise-ink-on-existing-work.md) | PE-003 | Unassigned (open) | 016, 017 |
 
 Ticket 009's library now opens the native editor, preserves package bytes during atomic rename, guards metadata operations on open documents, refreshes thumbnails and has two isolated simulator UI journeys. [The library report](../testing/library-009.md) records final check results and screenshots. These results do not close PE-001's physical A16/Pencil/VoiceOver acceptance or ticket 004's hardware review.
 
