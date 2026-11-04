@@ -16,7 +16,11 @@ struct AnthropicProvider: AIProvider {
         var content: [[String: Any]] = images.map { ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": $0]] }
         content.append(["type": "text", "text": request.instruction])
         var body: [String: Any] = ["model": request.model, "max_tokens": 4_096, "stream": true,
-                                 "system": NativeProviderSupport.system(request), "messages": [["role": "user", "content": content]]]
+                                 "system": NativeProviderSupport.system(request), "messages": request.history.map { ["role": $0.role.rawValue, "content": $0.text] as [String: Any] } + [["role": "user", "content": content]]]
+        if let effort = request.reasoning, ReasoningLevel.supports(preset: preset.id, model: request.model) {
+            body["thinking"] = effort == .off ? ["type": "disabled"] : ["type": "enabled", "budget_tokens": effort.budget]
+            body["max_tokens"] = 4096 + effort.budget
+        }
         if let schema, model.structuredOutput == .jsonSchema {
             body["output_config"] = ["format": ["type": "json_schema", "schema": schema]]
         }

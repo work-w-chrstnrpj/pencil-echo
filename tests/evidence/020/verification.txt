@@ -1,0 +1,12 @@
+2026-11-04 — tickets 020/021
+PASS: final Debug arm64 simulator build (PencilEcho).
+PASS: Release arm64 simulator build (PencilEcho).
+PASS: final hosted test target build-for-testing (PencilEcho).
+PASS: final UI test target build-for-testing (PencilEchoLibraryUI).
+PASS: scripts/verify-editor-chat-native.sh — 80 assertions.
+  61 provider/model/history/stream-parser assertions against repository sources.
+  19 native PencilKit/EditorSession/DocumentStore persistence and undo assertions.
+  Native rendering and thumbnails are explicitly stubbed; this does not validate iPad UI.
+BLOCKED/INTERRUPTED: hosted simulator tests and UI runtime journeys — boot stalls.
+NOT RUN: actual editor screenshots, A16/Pencil/VoiceOver, real-provider requests.
+Commands, limitations and regression inventory: docs/testing/editor-shell-and-chat-020-021.md

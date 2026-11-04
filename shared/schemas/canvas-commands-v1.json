@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "pencil-echo/canvas-commands-v1",
-  "title": "Pencil Echo canvas commands (version 2)",
-  "description": "Model answer for one AI request. Spec: docs/api/canvas-commands-v1.md. The app's validator is authoritative; limits in descriptions are enforced there.",
+  "title": "Pencil Echo canvas commands (version 3)",
+  "description": "Model answer for one AI request. Spec: docs/api/canvas-commands-v1.md. The app's validator is authoritative; limits in descriptions are enforced there. The app still accepts version 1 and version 2 answers.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,9 +14,9 @@
     "version": {
       "type": "integer",
       "enum": [
-        2
+        3
       ],
-      "description": "Version 2 adds plot objects and draw_ink. The app still accepts version 1 answers without them."
+      "description": "Version 3 adds diagram strokes, labels and page-coordinate ink. The app still accepts version 1 and version 2 answers."
     },
     "operations": {
       "type": "array",
@@ -145,13 +145,15 @@
           },
           {
             "type": "object",
-            "description": "Draw native ink: a sketch, picture, diagram, arrow or annotation. Points are in a local box of width x height, origin top-left, y down; the app scales the box into place.",
+            "description": "Draw native ink: a sketch, picture, diagram, arrow or annotation. Local points sit in a width x height box, origin top-left, y down, and the app scales the box into place. Page points (coordinates page) are page points: width and height are null and frame is null.",
             "additionalProperties": false,
             "required": [
               "op",
+              "coordinates",
               "width",
               "height",
               "strokes",
+              "labels",
               "placement",
               "frame"
             ],
@@ -162,17 +164,31 @@
                   "draw_ink"
                 ]
               },
+              "coordinates": {
+                "type": "string",
+                "enum": [
+                  "local",
+                  "page"
+                ],
+                "description": "local: points are in the width x height box. page: points are page points for ink drawn on existing work; width and height are null, placement is at_frame and frame is null."
+              },
               "width": {
-                "type": "number",
-                "description": "Local box width, 16 to 2000."
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Local box width, 16 to 2000. Null when coordinates is page."
               },
               "height": {
-                "type": "number",
-                "description": "Local box height, 16 to 2000."
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Local box height, 16 to 2000. Null when coordinates is page."
               },
               "strokes": {
                 "type": "array",
-                "description": "1 to 64 strokes, at most 2048 points in all.",
+                "description": "1 to 64 strokes. After wave and zigzag expansion, arrowheads and fills, at most 2048 points in all.",
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
@@ -181,7 +197,16 @@
                     "points",
                     "closed",
                     "color",
-                    "size"
+                    "size",
+                    "arrow",
+                    "fill",
+                    "amplitude",
+                    "wavelength",
+                    "center",
+                    "radiusX",
+                    "radiusY",
+                    "startAngle",
+                    "sweep"
                   ],
                   "properties": {
                     "kind": {
@@ -190,13 +215,17 @@
                         "line",
                         "polyline",
                         "smooth",
-                        "ellipse"
+                        "ellipse",
+                        "arc",
+                        "rect",
+                        "wave",
+                        "zigzag"
                       ],
-                      "description": "line: 2 points. polyline: straight segments. smooth: a curve through the points. ellipse: 2 points, opposite corners of its bounding box."
+                      "description": "line: 2 points. polyline: straight segments. smooth: a curve through the points. ellipse and rect: 2 points, opposite corners. arc: points is empty; use center, radiusX, radiusY, startAngle and sweep (degrees, y down). wave and zigzag: the spine in points, plus amplitude and wavelength."
                     },
                     "points": {
                       "type": "array",
-                      "description": "[x, y] pairs inside the local box; 2 to 128.",
+                      "description": "[x, y] pairs. 2 points for line, ellipse and rect; 2 to 128 for polyline, smooth, wave and zigzag; empty for arc.",
                       "items": {
                         "type": "array",
                         "items": {
@@ -206,7 +235,74 @@
                     },
                     "closed": {
                       "type": "boolean",
-                      "description": "Joins the last point to the first."
+                      "description": "Joins the last point to the first. fill paints the interior only when this is true, or when kind is ellipse or rect."
+                    },
+                    "arrow": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "end",
+                        "start",
+                        "both",
+                        "mid"
+                      ],
+                      "description": "Arrowhead at the end, the start, both, or halfway along. none draws no arrowhead."
+                    },
+                    "fill": {
+                      "type": "boolean",
+                      "description": "Paint the interior of a closed shape."
+                    },
+                    "amplitude": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "wave and zigzag only, 0.5 to 400. Null otherwise."
+                    },
+                    "wavelength": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "wave and zigzag only, 4 to 2000. Null otherwise."
+                    },
+                    "center": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "description": "arc only: [x, y]. Null otherwise.",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "radiusX": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "arc only, 1 to 2000. Null otherwise."
+                    },
+                    "radiusY": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "arc only, 1 to 2000. Null otherwise."
+                    },
+                    "startAngle": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "arc only, degrees from -1080 to 1080. 0 points right. Null otherwise."
+                    },
+                    "sweep": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "arc only, degrees from -1080 to 1080, not 0. Positive sweep goes clockwise. Null otherwise."
                     },
                     "color": {
                       "type": "string",
@@ -226,6 +322,38 @@
                     "size": {
                       "type": "number",
                       "description": "Pen width in page points, 1 to 24; about 3 for outlines."
+                    }
+                  }
+                }
+              },
+              "labels": {
+                "type": "array",
+                "description": "0 to 16 short labels placed with the drawing. Each text is at most 40 bytes.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "text",
+                    "x",
+                    "y"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "latex"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
                     }
                   }
                 }

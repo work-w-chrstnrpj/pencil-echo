@@ -161,6 +161,14 @@ final class AISettingsModel {
 
 /// AI provider settings (ticket 012): provider, endpoint, model, key and a connection test.
 struct AISettingsView: View {
+    private static var notices: String {
+        guard let root = Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: nil),
+              let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return "See the bundled third-party notices for SwiftMath and its dependencies." }
+        return files.compactMap { ($0 as? URL).flatMap { try? String(contentsOf: $0, encoding: .utf8) } }.joined(separator: "\n\n")
+    }
+
+    var onDone: (() -> Void)? = nil
+    @State private var canvasSettings = CanvasAISettings.load()
     @State private var model = AISettingsModel()
     @State private var autoAsk = AutoAskSettings.load()
     @Environment(\.dismiss) private var dismiss
@@ -168,6 +176,26 @@ struct AISettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Saved AI connections") {
+                    ForEach(ProviderCatalog.all.filter { model.settings.providers[$0.id] != nil || $0.id == model.presetID }) { preset in
+                        Button { model.select(preset.id) } label: {
+                            LabeledContent(preset.displayName, value: model.settings.settings(for: preset.id).model)
+                        }.accessibilityHint("Switch to this saved provider and model")
+                    }
+                }
+                Section("Canvas preferences") {
+                    Picker("AI font", selection: $canvasSettings.appearance.font) {
+                        ForEach(AIAnswerAppearance.Font.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                    }
+                    Toggle("Thinking indicator", isOn: $canvasSettings.thinkingIndicator)
+                }.onChange(of: canvasSettings) { _, value in value.save() }
+                Section("About") {
+                    LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                    NavigationLink("Third-party notices") {
+                        ScrollView { Text(Self.notices).font(.footnote).padding() }.navigationTitle("Third-party notices")
+                    }
+                }
+
                 Section {
                     Picker("Provider", selection: Binding(get: { model.presetID }, set: { model.select($0) })) {
                         ForEach(ProviderCatalog.all) { Text($0.displayName).tag($0.id) }
@@ -281,14 +309,14 @@ struct AISettingsView: View {
                 .onChange(of: autoAsk) { _, settings in settings.save() }
 
                 Section("What is sent") {
-                    Text("When Ask AI runs, Pencil Echo sends an image of your selection (or the ink you just wrote, or the visible area) and your instruction to \(model.preset?.displayName ?? "the provider") at \(model.effectiveBaseURL?.host() ?? "the endpoint above"). Nothing else from your documents is sent. The provider's own terms apply to what you send.")
+                    Text("When Ask AI runs, Pencil Echo sends an image of your selection (or the ink you just wrote, or the visible area) and your instruction to \(model.preset?.displayName ?? "the provider") at \(model.effectiveBaseURL?.host() ?? "the endpoint above"). Chat sends your selection or visible page plus up to 10 recent text turns. Earlier images are never resent. The provider's own terms apply to what you send.")
                         .font(.callout)
                 }
             }
             .navigationTitle("AI Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { if let onDone { onDone() } else { dismiss() } } }
             }
             .onDisappear { model.cancel() }
         }

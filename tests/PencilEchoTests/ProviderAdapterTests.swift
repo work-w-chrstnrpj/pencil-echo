@@ -91,6 +91,23 @@ struct ProviderAdapterTests {
         #expect((content.last?["image_url"] as? [String: String])?["url"]?.hasPrefix("data:image/png;base64,") == true)
     }
 
+    @Test func twoImagesKeepContextThenFocusOrder() async throws {
+        let transport = FixtureTransport(body: try fixture("stream-success", "sse"))
+        let context = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")!
+        let focus = try Data(contentsOf: #require(Bundle.main.url(forResource: "handwritten-equation", withExtension: "png")))
+        var sent = try request()
+        sent.pngImages = [context, focus]
+        _ = try await collect(provider(transport), sent)
+        let payload = try #require(transport.recorded.first?.httpBody)
+        let body = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        let messages = try #require(body["messages"] as? [[String: Any]])
+        let content = try #require(messages.last?["content"] as? [[String: Any]])
+        let images = content.compactMap { ($0["image_url"] as? [String: String])?["url"] }
+        #expect(images.count == 2)
+        #expect(images[0].hasSuffix(context.base64EncodedString()))
+        #expect(images[1].hasSuffix(focus.base64EncodedString()))
+    }
+
     @Test(arguments: [401, 403, 404, 408, 429, 500, 504, 302])
     func statusErrorsAreNormalizedWithoutBodyText(_ status: Int) async throws {
         let body = try fixture(status == 429 ? "rate-limit" : "auth-error", "json")

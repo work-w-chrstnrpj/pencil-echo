@@ -79,10 +79,23 @@ enum RichTextRenderer {
         UIFont(name: bold ? "Noteworthy-Bold" : "Noteworthy-Light", size: size) ?? .systemFont(ofSize: size, weight: bold ? .bold : .regular)
     }
 
+    static func ink(_ appearance: AIAnswerAppearance?) -> UIColor {
+        InkAnswer.color(InkStrokeSpec.Color(rawValue: appearance?.ink.rawValue ?? "blue") ?? .blue)
+    }
+    static func font(_ appearance: AIAnswerAppearance?, size: CGFloat, bold: Bool = false) -> UIFont {
+        switch appearance?.font ?? .handwritten {
+        case .handwritten: return handwrittenFont(size: size, bold: bold)
+        case .system: return UIFont.systemFont(ofSize: size, weight: bold ? .bold : .regular)
+        case .rounded:
+            let base = UIFont.systemFont(ofSize: size, weight: bold ? .bold : .regular)
+            return UIFont(descriptor: base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor, size: size)
+        }
+    }
+
     static func build(source: String, type: ObjectType, width: CGFloat, density: CGFloat = 1,
-                      handwritten: Bool = false) -> RichTextResult {
-        let ink: UIColor = handwritten ? handwrittenInk : .black
-        let bodyFont = handwritten ? handwrittenFont(size: handwrittenSize) : UIFont.systemFont(ofSize: fontSize)
+                      handwritten: Bool = false, appearance: AIAnswerAppearance? = nil) -> RichTextResult {
+        let ink: UIColor = handwritten ? self.ink(appearance) : .black
+        let bodyFont = handwritten ? font(appearance, size: handwrittenSize) : UIFont.systemFont(ofSize: fontSize)
         let base: [NSAttributedString.Key: Any] = [.font: bodyFont, .foregroundColor: ink]
         guard source.utf8.count <= 32 * 1_024, width.isFinite, width >= 24, width <= 2_048 else {
             return fallback(source)
@@ -92,7 +105,7 @@ enum RichTextRenderer {
             guard let spec = try? PlotSpec.parse(source) else { return fallback(source) }
             let size = CGSize(width: width - 2 * inset, height: PlotRenderer.height(width: width - 2 * inset))
             let attachment = NSTextAttachment()
-            attachment.image = PlotRenderer.image(spec, size: size, density: density, handwritten: handwritten)
+            attachment.image = PlotRenderer.image(spec, size: size, density: density, handwritten: handwritten, appearance: appearance)
             attachment.bounds = CGRect(origin: .zero, size: size)
             return RichTextResult(text: NSAttributedString(attachment: attachment), warning: false)
         }
@@ -139,7 +152,7 @@ enum RichTextRenderer {
             if intent.contains(.code) || codeBlock {
                 font = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
             } else if handwritten {
-                font = handwrittenFont(size: size * handwrittenSize / fontSize, bold: traits.contains(.traitBold))
+                font = self.font(appearance, size: size * handwrittenSize / fontSize, bold: traits.contains(.traitBold))
             } else {
                 font = UIFont.systemFont(ofSize: size)
                 if let descriptor = font.fontDescriptor.withSymbolicTraits(traits), !traits.isEmpty { font = UIFont(descriptor: descriptor, size: size) }
@@ -192,8 +205,8 @@ enum RichTextRenderer {
         return min(maxWidth, max(48, ceil(natural + 2 * inset + 4)))
     }
 
-    static func draw(source: String, type: ObjectType, in rect: CGRect, density: CGFloat = 1, handwritten: Bool = false) {
-        let result = build(source: source, type: type, width: rect.width, density: density, handwritten: handwritten)
+    static func draw(source: String, type: ObjectType, in rect: CGRect, density: CGFloat = 1, handwritten: Bool = false, appearance: AIAnswerAppearance? = nil) {
+        let result = build(source: source, type: type, width: rect.width, density: density, handwritten: handwritten, appearance: appearance)
         let content = CGRect(x: rect.minX + inset, y: rect.minY + inset,
                              width: max(0, rect.width - 2 * inset), height: max(0, rect.height - 2 * inset))
         if content.width > 0, content.height > 0 {
@@ -211,6 +224,7 @@ final class RichObjectView: UIView {
     private var type: ObjectType = .text
     private var density: CGFloat = 1
     private var handwritten = false
+    private var appearance: AIAnswerAppearance?
     private var renderWidth: CGFloat = 0
     private(set) var hasWarning = false
 
@@ -228,14 +242,14 @@ final class RichObjectView: UIView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    func configure(source: String, type: ObjectType, density: CGFloat, handwritten: Bool = false) {
+    func configure(source: String, type: ObjectType, density: CGFloat, handwritten: Bool = false, appearance: AIAnswerAppearance? = nil) {
         let nextDensity = min(8, max(1, density))
-        if self.source == source, self.type == type, self.density == nextDensity, self.handwritten == handwritten,
+        if self.source == source, self.type == type, self.density == nextDensity, self.handwritten == handwritten, self.appearance == appearance,
            renderWidth == bounds.width { return }
-        self.source = source; self.type = type; self.density = nextDensity; self.handwritten = handwritten
+        self.source = source; self.type = type; self.density = nextDensity; self.handwritten = handwritten; self.appearance = appearance
         renderWidth = bounds.width
         let result = RichTextRenderer.build(source: source, type: type, width: bounds.width, density: nextDensity,
-                                            handwritten: handwritten)
+                                            handwritten: handwritten, appearance: appearance)
         label.attributedText = result.text
         hasWarning = result.warning
         let area = max(1, bounds.width * bounds.height)

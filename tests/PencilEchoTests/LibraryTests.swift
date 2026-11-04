@@ -30,6 +30,22 @@ final class LibraryTests {
         try FileManager.default.copyItem(at: package, to: root.appendingPathComponent(package.lastPathComponent))
     }
 
+    /// Writes a manifest-only package with controlled dates for section/search/sort tests.
+    @discardableResult
+    private func writePackage(title: String, type: DocumentType = .canvas, createdAt: Date,
+                              updatedAt: Date, lastOpenedAt: Date? = nil,
+                              isFavorite: Bool = false) throws -> UUID {
+        let id = UUID()
+        let package = root.appendingPathComponent(id.uuidString + ".pencilecho", isDirectory: true)
+        try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+        let manifest = DocumentManifest(schemaVersion: 1, id: id, type: type, title: title, revision: 0,
+                                        createdAt: createdAt, updatedAt: updatedAt, appVersion: "test",
+                                        isFavorite: isFavorite, lastOpenedAt: lastOpenedAt)
+        try DocumentCoding.encoder().encode(manifest)
+            .write(to: package.appendingPathComponent(DocumentStore.FileName.manifest))
+        return id
+    }
+
     // MARK: Store
 
     @Test func renameKeepsRevisionAndContent() async throws {
@@ -297,6 +313,163 @@ final class LibraryTests {
         #expect(loaded.objects.first?.source == "Saved preview")
         #expect(model.items.first?.updatedAt == loaded.manifest.updatedAt)
         #expect(loaded.manifest.revision == 1)
+    }
+
+    // MARK: Library metadata, sections, search and sort (ticket 022)
+
+    @Test func favoriteAndLastOpenedPersistWithoutChangingContent() async throws {
+        let created = try await store.create(type: .canvas)
+        let original = try await store.load(id: created.id).document
+        let openedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+        try await store.setFavorite(id: created.id, isFavorite: true)
+        try await store.recordOpened(id: created.id, at: openedAt)
+
+        let updated = try await store.load(id: created.id).document
+        #expect(updated.manifest.isFavorite == true)
+        #expect(updated.manifest.lastOpenedAt == openedAt)
+        #expect(updated.manifest.revision == original.manifest.revision)
+        #expect(updated.manifest.updatedAt == original.manifest.updatedAt)
+        #expect(updated.pages == original.pages && updated.objects == original.objects)
+
+        let listed = try #require(await store.list().first)
+        #expect(listed.isFavorite && listed.lastOpenedAt == openedAt)
+        #expect(listed.createdAt == original.manifest.createdAt)
+
+        try await store.setFavorite(id: created.id, isFavorite: false)
+        #expect(try await store.load(id: created.id).document.manifest.isFavorite == false)
+    }
+
+    @Test func favoriteWritePreservesUnknownFilesAndFailedWriteKeepsMetadata() async throws {
+        let created = try await store.create(type: .canvas)
+        let package = await store.packageURL(for: created.id)
+        let unknown = package.appendingPathComponent("future.bin")
+        try Data([1, 2, 3]).write(to: unknown)
+
+        try await store.setFavorite(id: created.id, isFavorite: true)
+        #expect(try Data(contentsOf: unknown) == Data([1, 2, 3]))
+
+        let failing = DocumentStore(rootURL: root,
+                                    preMigrationURL: root.deletingLastPathComponent().appendingPathComponent("PreMigration"),
+                                    writer: PackageFileWriter { _, _ in throw CocoaError(.fileWriteUnknown) })
+        await #expect(throws: CocoaError.self) { try await failing.setFavorite(id: created.id, isFavorite: false) }
+        #expect(try await store.load(id: created.id).document.manifest.isFavorite == true)
+    }
+
+    @Test func packagesWithoutLibraryMetadataAppearInAllDocuments() async throws {
+        try installFixture("v1-canvas-empty")
+        let listed = try #require(await store.list().first)
+        #expect(listed.state == .ok)
+        #expect(listed.isFavorite == false && listed.lastOpenedAt == nil)
+        #expect(listed.createdAt != nil)
+
+        let model = LibraryModel(store: store)
+        await model.refresh()
+        #expect(model.displayedItems(in: .all).count == 1)
+        #expect(model.displayedItems(in: .favorites).isEmpty)
+        #expect(model.displayedItems(in: .recent).isEmpty)
+    }
+
+    @Test func recentWindowAndEverySortKey() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try writePackage(title: "Alpha", createdAt: now.addingTimeInterval(-5 * 86_400),
+                         updatedAt: now.addingTimeInterval(-2 * 86_400),
+                         lastOpenedAt: now.addingTimeInterval(-1 * 86_400), isFavorite: true)
+        try writePackage(title: "bravo", type: .notebook, createdAt: now,
+                         updatedAt: now.addingTimeInterval(-3 * 86_400),
+                         lastOpenedAt: now.addingTimeInterval(-31 * 86_400))
+        try writePackage(title: "Charlie", createdAt: now.addingTimeInterval(-10 * 86_400),
+                         updatedAt: now, isFavorite: true)
+        try writePackage(title: "Old", createdAt: now.addingTimeInterval(-40 * 86_400),
+                         updatedAt: now.addingTimeInterval(-40 * 86_400),
+                         lastOpenedAt: now.addingTimeInterval(-40 * 86_400))
+
+        let model = LibraryModel(store: store, now: { now })
+        await model.refresh()
+
+        // Recent is the last 30 days, newest opened first.
+        #expect(model.displayedItems(in: .recent).map(\.title) == ["Alpha"])
+        #expect(model.displayedItems(in: .favorites).map(\.title) == ["Charlie", "Alpha"])
+        #expect(model.displayedItems(in: .canvases).map(\.title) == ["Charlie", "Alpha", "Old"])
+        #expect(model.displayedItems(in: .notebooks).map(\.title) == ["bravo"])
+        #expect(model.displayedItems(in: .all, sort: .title).map(\.title) == ["Alpha", "bravo", "Charlie", "Old"])
+        #expect(model.displayedItems(in: .all, sort: .created).map(\.title) == ["bravo", "Alpha", "Charlie", "Old"])
+        #expect(model.displayedItems(in: .all, sort: .lastOpened).map(\.title) == ["Alpha", "bravo", "Old", "Charlie"])
+        #expect(model.displayedItems(in: .all, sort: .lastModified).map(\.title) == ["Charlie", "Alpha", "bravo", "Old"])
+    }
+
+    @Test func searchFiltersTitlesAsTyped() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try writePackage(title: "Calculus homework", createdAt: now, updatedAt: now)
+        try writePackage(title: "Physics", type: .notebook, createdAt: now, updatedAt: now)
+        try writePackage(title: "Calculus notes", createdAt: now, updatedAt: now)
+
+        let model = LibraryModel(store: store, now: { now })
+        await model.refresh()
+        #expect(model.displayedItems(in: .all, search: "CALC").count == 2)
+        #expect(model.displayedItems(in: .all, search: "homework").map(\.title) == ["Calculus homework"])
+        #expect(model.displayedItems(in: .all, search: "   ").count == 3)
+        #expect(model.displayedItems(in: .all, search: "missing").isEmpty)
+        #expect(model.displayedItems(in: .notebooks, search: "calc").isEmpty)
+    }
+
+    @Test func preferencesRememberSortAndLayoutAcrossRelaunch() throws {
+        let suite = "LibraryPreferencesTests-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        var preferences = LibraryPreferences(defaults: defaults)
+        #expect(preferences.sort == .lastModified && preferences.layout == .grid)
+        preferences.sort = .lastOpened
+        preferences.layout = .list
+
+        let relaunched = LibraryPreferences(defaults: defaults)
+        #expect(relaunched.sort == .lastOpened && relaunched.layout == .list)
+
+        defaults.set("not-a-sort", forKey: LibraryPreferences.sortKey)
+        defaults.set("not-a-layout", forKey: LibraryPreferences.layoutKey)
+        let invalid = LibraryPreferences(defaults: defaults)
+        #expect(invalid.sort == .lastModified && invalid.layout == .grid)
+    }
+
+    @Test func modelTogglesFavoriteAndRecordsOpen() async throws {
+        let model = LibraryModel(store: store)
+        let item = try #require(await model.create(.canvas))
+        let id = try #require(item.documentId)
+        #expect(model.displayedItems(in: .recent).count == 1)
+
+        await model.setFavorite(item, isFavorite: true)
+        let favorited = try #require(model.items.first { $0.documentId == id })
+        #expect(favorited.isFavorite)
+        #expect(model.displayedItems(in: .favorites).map(\.documentId) == [id])
+
+        await model.setFavorite(favorited, isFavorite: false)
+        #expect(model.displayedItems(in: .favorites).isEmpty)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test func openingRecordsLastOpenedForRecent() async throws {
+        let created = try await store.create(type: .notebook)
+        let model = LibraryModel(store: store)
+        await model.refresh()
+        let item = try #require(model.items.first)
+        #expect(model.displayedItems(in: .recent).isEmpty)
+
+        #expect(await model.prepareToOpen(item))
+        #expect(model.displayedItems(in: .recent).map(\.documentId) == [created.id])
+        #expect(try await store.load(id: created.id).document.manifest.lastOpenedAt != nil)
+    }
+
+    @Test func favoriteIsRefusedWhileAnotherWindowEdits() async throws {
+        let model = LibraryModel(store: store)
+        let item = try #require(await model.create(.canvas))
+        let id = try #require(item.documentId)
+        #expect(OpenDocuments.shared.claim(id))
+        defer { OpenDocuments.shared.release(id) }
+
+        await model.setFavorite(item, isFavorite: true)
+        #expect(model.errorMessage?.contains("before changing favorites") == true)
+        #expect(try await store.load(id: id).document.manifest.isFavorite != true)
     }
 
 }

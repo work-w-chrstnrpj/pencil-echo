@@ -41,6 +41,12 @@ struct DocumentManifest: Codable, Equatable, Sendable {
     var updatedAt: Date
     /// Diagnostic only; never used for logic.
     var appVersion: String
+    /// Optional v1 editor preferences. Missing values retain the previous behavior.
+    var gridVisible: Bool? = nil
+    var chatPanelOpen: Bool? = nil
+    /// Optional v1 library metadata (ticket 022). Absent means not favorited and never opened.
+    var isFavorite: Bool? = nil
+    var lastOpenedAt: Date? = nil
 }
 
 struct PageSize: Codable, Equatable, Sendable {
@@ -125,6 +131,8 @@ struct DocumentObject: Codable, Equatable, Identifiable, Sendable {
     var createdBy: ObjectCreator
     var createdAt: Date
     var updatedAt: Date
+    var aiAppearance: AIAnswerAppearance? = nil
+    var isDraft: Bool? = nil
 }
 
 struct AppliedRequest: Codable, Equatable, Sendable {
@@ -176,6 +184,7 @@ struct Document: Equatable, Sendable {
     var ink: [UUID: Data] = [:]
     var pendingAssets: [String: Data] = [:]
     var conversation: Conversation?
+    var chat: AgentChatHistory? = nil
     var thumbnail: Data?
     /// Set when the package was migrated in memory from an older schema version.
     var migratedFrom: Int?
@@ -199,6 +208,11 @@ enum DocumentCoding {
         return encoder
     }
 
+    /// The schema's ISO 8601 UTC representation, for metadata written without a full encode.
+    static func string(from date: Date) -> String {
+        date.formatted(dateStyle)
+    }
+
     static func date(from text: String) -> Date? {
         (try? Date(text, strategy: dateStyle)) ?? (try? Date(text, strategy: .iso8601))
     }
@@ -214,4 +228,42 @@ enum DocumentCoding {
         }
         return decoder
     }
+}
+
+/// Chat text is local to this document. No capture images or raw reasoning persist.
+struct AgentChatHistory: Codable, Equatable, Sendable {
+    var messages: [ConversationMessage] = []
+    var draftInk: [DraftInkBatch] = []
+    static let maxTurns = 10
+    static let maxFileBytes = 512 * 1024
+    mutating func append(user: String, assistant: String, requestId: UUID, at date: Date) {
+        func clipped(_ text: String) -> String {
+            var text = String(text.prefix(DocumentLimits.maxMessageBytes))
+            while text.utf8.count > DocumentLimits.maxMessageBytes { text.removeLast() }
+            return text
+        }
+        messages += [ConversationMessage(id: UUID(), role: .user, requestId: requestId, text: clipped(user), createdAt: date),
+                     ConversationMessage(id: UUID(), role: .assistant, requestId: requestId, text: clipped(assistant), createdAt: date)]
+        messages = Array(messages.suffix(Self.maxTurns * 2))
+    }
+    var isValid: Bool {
+        messages.count <= Self.maxTurns * 2 && messages.count.isMultiple(of: 2) && messages.enumerated().allSatisfy {
+            $0.element.text.utf8.count <= DocumentLimits.maxMessageBytes && $0.element.role == ($0.offset.isMultiple(of: 2) ? .user : .assistant)
+        } && draftInk.count <= DocumentLimits.maxObjects && draftInk.allSatisfy { $0.strokeDate.timeIntervalSince1970 < 0 }
+    }
+}
+
+/// PencilKit preserves path.creationDate across serialization and transforms.
+/// Draft strokes use a unique pre-epoch marker, so Auto Ask never treats them as new user ink.
+struct DraftInkBatch: Codable, Equatable, Sendable {
+    var requestId: UUID
+    var strokeDate: Date
+}
+
+/// Optional object style keeps existing packages readable without a schema bump.
+struct AIAnswerAppearance: Codable, Equatable, Sendable {
+    enum Font: String, Codable, CaseIterable, Sendable { case handwritten, rounded, system }
+    enum Ink: String, Codable, CaseIterable, Sendable { case blue, black, gray, red, green, orange, purple, brown }
+    var ink: Ink = .blue
+    var font: Font = .handwritten
 }

@@ -120,7 +120,8 @@ struct CommandValidatorTests {
     }
 
     @Test func wrongVersion() {
-        #expect(validate(Self.answer([Self.add()], version: "3")) == .invalid(.schema("/version")))
+        #expect(validate(Self.answer([Self.add()], version: "4")) == .invalid(.schema("/version")))
+        #expect(validate(Self.answer([Self.add()], version: "3")) != .invalid(.schema("/version")))
         #expect(validate(Self.answer([Self.add()], version: "2")) != .invalid(.schema("/version")))
         #expect(validate(Self.answer([Self.add()], version: "true")) == .invalid(.schema("/version")))
     }
@@ -224,10 +225,100 @@ struct CommandValidatorTests {
             .appendingPathComponent("shared/schemas/canvas-commands-v1.json")
         let text = try String(contentsOf: url, encoding: .utf8)
         let names = CanvasOperation.opNames + CanvasObjectType.allCases.map(\.rawValue) +
-            PlacementHint.allCases.map(\.rawValue)
+            PlacementHint.allCases.map(\.rawValue) + InkStrokeSpec.Kind.allCases.map(\.rawValue) +
+            InkStrokeSpec.Arrow.allCases.map(\.rawValue) + InkCoordinates.allCases.map(\.rawValue) +
+            InkLabel.Kind.allCases.map(\.rawValue)
         for name in names {
             #expect(text.contains("\"\(name)\""), "schema is missing \(name)")
         }
+        let schema = try #require(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        let operations = try #require((schema["properties"] as? [String: Any])?["operations"] as? [String: Any])
+        let draw = try #require((operations["items"] as? [String: Any])?["anyOf"] as? [[String: Any]])
+            .first { ($0["properties"] as? [String: Any])?["op"] != nil && text.contains("draw_ink") &&
+                (($0["properties"] as? [String: Any])?["strokes"] != nil) }
+        #expect(draw?["additionalProperties"] as? Bool == false)
+        let stroke = try #require((((draw?["properties"] as? [String: Any])?["strokes"] as? [String: Any])?["items"] as? [String: Any]))
+        #expect(stroke["additionalProperties"] as? Bool == false)
+        let fields = try #require(stroke["properties"] as? [String: Any])
+        #expect(fields["arrow"] != nil && fields["fill"] != nil && fields["wavelength"] != nil && fields["sweep"] != nil)
+        #expect(fields["mystery"] == nil)
+    }
+}
+
+// Ticket 018 and 019: diagram strokes, labels, and page-coordinate ink.
+struct DiagramCommandTests {
+    let base = CommandValidatorTests()
+
+    func validate(_ operations: [String], version: String = "3") -> ValidationResult {
+        base.validate(CommandValidatorTests.answer(operations, version: version))
+    }
+
+    func stroke(_ body: String) -> String {
+        VisualCommandTests.ink(strokes: "[\(body)]")
+    }
+
+    @Test func version2DrawingStillValidates() {
+        guard case .valid(let operations) = validate([VisualCommandTests.ink()], version: "2") else {
+            Issue.record("expected valid"); return
+        }
+        guard case .drawInk(let drawing, _, _) = operations[0] else { Issue.record("expected ink"); return }
+        #expect(drawing.coordinates == .local && drawing.labels.isEmpty && drawing.strokes[0].arrow == .none)
+    }
+
+    @Test func newKindsAndFieldsNeedVersion3() {
+        let arc = #"{"kind":"arc","points":[],"closed":false,"color":"black","size":3,"center":[40,40],"radiusX":20,"radiusY":10,"startAngle":0,"sweep":90}"#
+        #expect(validate([stroke(arc)], version: "2") == .invalid(.schema("/operations/0/strokes/0/kind")))
+        let arrow = #"{"kind":"line","points":[[0,0],[40,0]],"closed":false,"color":"black","size":3,"arrow":"end"}"#
+        #expect(validate([stroke(arrow)], version: "2") == .invalid(.schema("/operations/0/strokes/0/arrow")))
+        let labeled = VisualCommandTests.ink().dropLast() + #","labels":[]}"#
+        #expect(validate([String(labeled)], version: "2") == .invalid(.schema("/operations/0/labels")))
+    }
+
+    @Test func rejectsMalformedDiagramValues() {
+        let badSweep = #"{"kind":"arc","points":[],"closed":false,"color":"black","size":3,"center":[40,40],"radiusX":20,"radiusY":10,"startAngle":0,"sweep":0}"#
+        #expect(validate([stroke(badSweep)]) == .invalid(.limit("/operations/0/strokes/0/sweep")))
+        // 1e400 overflows JSON number parsing, so the whole answer is malformed.
+        // A finite angle outside -1080...1080 is a limit error on the sweep.
+        let overflow = #"{"kind":"arc","points":[],"closed":false,"color":"black","size":3,"center":[40,40],"radiusX":20,"radiusY":10,"startAngle":0,"sweep":1e400}"#
+        let overflowResult = validate([stroke(overflow)])
+        #expect(overflowResult == .invalid(.malformedJSON) || overflowResult == .invalid(.limit("/operations/0/strokes/0/sweep")))
+        let huge = #"{"kind":"arc","points":[],"closed":false,"color":"black","size":3,"center":[40,40],"radiusX":20,"radiusY":10,"startAngle":0,"sweep":5000}"#
+        #expect(validate([stroke(huge)]) == .invalid(.limit("/operations/0/strokes/0/sweep")))
+        let negative = #"{"kind":"wave","points":[[0,20],[80,20]],"closed":false,"color":"black","size":3,"amplitude":-2,"wavelength":20}"#
+        #expect(validate([stroke(negative)]) == .invalid(.limit("/operations/0/strokes/0/amplitude")))
+        let unknown = #"{"kind":"line","points":[[0,0],[10,0]],"closed":false,"color":"black","size":3,"arrow":"sideways"}"#
+        #expect(validate([stroke(unknown)]) == .invalid(.schema("/operations/0/strokes/0/arrow")))
+        let filled = #"{"kind":"line","points":[[0,0],[10,0]],"closed":false,"color":"black","size":3,"fill":"yes"}"#
+        #expect(validate([stroke(filled)]) == .invalid(.schema("/operations/0/strokes/0/fill")))
+        let extra = #"{"kind":"line","points":[[0,0],[10,0]],"closed":false,"color":"black","size":3,"dash":true}"#
+        #expect(validate([stroke(extra)]) == .invalid(.schema("/operations/0/strokes/0/dash")))
+        let long = String(repeating: "a", count: CommandLimits.maxInkLabelBytes + 1)
+        let label = VisualCommandTests.ink().dropLast() + #","labels":[{"kind":"text","text":"\#(long)","x":10,"y":10}]}"#
+        #expect(validate([String(label)]) == .invalid(.limit("/operations/0/labels/0/text")))
+        let many = (0..<17).map { #"{"kind":"text","text":"n","x":\#($0),"y":1}"# }.joined(separator: ",")
+        let tooMany = VisualCommandTests.ink().dropLast() + #","labels":[\#(many)]}"#
+        #expect(validate([String(tooMany)]) == .invalid(.limit("/operations/0/labels")))
+        let outside = #"{"kind":"wave","points":[[0,10],[90,10]],"closed":false,"color":"black","size":3,"amplitude":40,"wavelength":20}"#
+        #expect(validate([stroke(outside)]) == .invalid(.geometry("/operations/0/strokes/0/points/0"))
+                || validate([stroke(outside)]) == .invalid(.geometry("/operations/0/strokes/0/points/1"))
+                || { if case .invalid(.geometry) = validate([stroke(outside)]) { return true }; return false }())
+        let spine = #"{"kind":"wave","points":[[0,50],[2000,50]],"closed":false,"color":"black","size":3,"amplitude":10,"wavelength":4}"#
+        #expect(validate([VisualCommandTests.ink(strokes: "[\(spine)]", width: 2000, height: 200)]) == .invalid(.limit("/operations/0/strokes/0/points"))
+                || validate([VisualCommandTests.ink(strokes: "[\(spine)]", width: 2000, height: 200)]) == .invalid(.limit("/operations/0/strokes")))
+    }
+
+    @Test func pageInkMustStayOnThePageAndNearTheCapture() {
+        let near = #"{"op":"draw_ink","coordinates":"page","width":null,"height":null,"strokes":[{"kind":"line","points":[[80,80],[200,120]],"closed":false,"color":"red","size":3}],"labels":[],"placement":"at_frame","frame":null}"#
+        guard case .valid(let operations) = validate([near]) else { Issue.record("expected valid"); return }
+        guard case .drawInk(let drawing, .atFrame, nil) = operations[0] else { Issue.record("expected page ink"); return }
+        #expect(drawing.coordinates == .page && drawing.strokes[0].points[1].x == 200)
+        let far = #"{"op":"draw_ink","coordinates":"page","width":null,"height":null,"strokes":[{"kind":"line","points":[[80,80],[520,400]],"closed":false,"color":"red","size":3}],"labels":[],"placement":"at_frame","frame":null}"#
+        #expect(validate([far]) == .invalid(.geometry("/operations/0/strokes/0/points/1"))
+                || { if case .invalid(.geometry) = validate([far]) { return true }; return false }())
+        let off = #"{"op":"draw_ink","coordinates":"page","width":null,"height":null,"strokes":[{"kind":"line","points":[[80,80],[-20,80]],"closed":false,"color":"red","size":3}],"labels":[],"placement":"at_frame","frame":null}"#
+        guard case .invalid(.geometry) = validate([off]) else { Issue.record("expected geometry"); return }
+        let boxed = #"{"op":"draw_ink","coordinates":"page","width":100,"height":100,"strokes":[{"kind":"line","points":[[80,80],[120,80]],"closed":false,"color":"red","size":3}],"labels":[],"placement":"at_frame","frame":null}"#
+        #expect(validate([boxed]) == .invalid(.schema("/operations/0/width")))
     }
 }
 

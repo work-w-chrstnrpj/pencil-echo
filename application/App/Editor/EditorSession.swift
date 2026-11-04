@@ -1,10 +1,12 @@
 import PencilKit
+import Observation
 
 /// Everything an undo step restores. Ink is the composed document-space drawing.
 struct EditorSnapshot: Equatable {
     var pages: [Page]
     var drawing: PKDrawing
     var objects: [DocumentObject]
+    var draftInk: [DraftInkBatch] = []
 }
 
 /// One open document: content, unified undo, revision and autosave (ticket 008).
@@ -15,6 +17,7 @@ struct EditorSnapshot: Equatable {
 /// Revision follows docs/database/document-schema-v1.md: +1 per committed content
 /// change, undo and redo included, never for previews, selection or view changes.
 @MainActor
+@Observable
 final class EditorSession {
     enum SaveState: Equatable {
         case saved
@@ -34,6 +37,7 @@ final class EditorSession {
     private(set) var pages: [Page]
     private(set) var objects: [DocumentObject]
     private(set) var drawing: PKDrawing
+    private(set) var draftInk: [DraftInkBatch]
     private(set) var savedRevision: Int
     private(set) var saveState: SaveState {
         didSet { if saveState != oldValue { onSaveStateChange?(saveState) } }
@@ -44,6 +48,8 @@ final class EditorSession {
     var onApply: (() -> Void)?
     var onSaveStateChange: ((SaveState) -> Void)?
 
+    private var metadataGeneration = 0
+    private var savedMetadataGeneration = 0
     private var base: Document
     private var autosaveTask: Task<Void, Never>?
     private var saveChain: Task<Void, Never>?
@@ -58,6 +64,7 @@ final class EditorSession {
         manifest = document.manifest
         pages = document.pages
         objects = document.objects
+        draftInk = document.chat?.draftInk ?? []
         savedRevision = document.manifest.revision
         let layout = EditorLayout(type: document.manifest.type, pages: document.pages)
         drawing = layout.compose(document.ink.compactMapValues { try? PKDrawing(data: $0) })
@@ -71,8 +78,8 @@ final class EditorSession {
     var type: DocumentType { manifest.type }
     var revision: Int { manifest.revision }
     var layout: EditorLayout { EditorLayout(type: manifest.type, pages: pages) }
-    var snapshot: EditorSnapshot { EditorSnapshot(pages: pages, drawing: drawing, objects: objects) }
-    var hasUnsavedChanges: Bool { manifest.revision != savedRevision }
+    var snapshot: EditorSnapshot { EditorSnapshot(pages: pages, drawing: drawing, objects: objects, draftInk: draftInk) }
+    var hasUnsavedChanges: Bool { manifest.revision != savedRevision || metadataGeneration != savedMetadataGeneration }
 
     // MARK: - Applying changes
 
@@ -133,6 +140,7 @@ final class EditorSession {
         pages = state.pages
         drawing = state.drawing
         objects = state.objects
+        draftInk = state.draftInk
         // Programmatic drawing assignment must not register a second PencilKit undo.
         manager.disableUndoRegistration()
         onApply?()
@@ -149,6 +157,24 @@ final class EditorSession {
     private func contentChanged() {
         manifest.revision += 1
         scheduleAutosave()
+    }
+
+    private func metadataChanged() { metadataGeneration += 1; scheduleAutosave() }
+
+    func rename(to title: String) -> Bool {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isReadOnly, !title.isEmpty, title.count <= DocumentLimits.maxTitleLength else { return false }
+        guard title != manifest.title else { return true }
+        manifest.title = title
+        metadataChanged()
+        return true
+    }
+
+    func setGridVisible(_ visible: Bool) {
+        guard !isReadOnly else { return }
+        manifest.gridVisible = visible
+        metadataChanged()
+        onApply?()
     }
 
     // MARK: - Edits
@@ -298,6 +324,52 @@ final class EditorSession {
         commit(next, named: name)
     }
 
+    // MARK: - Agent chat (021)
+
+    var chatHistory: AgentChatHistory { base.chat ?? AgentChatHistory() }
+    var hasDrafts: Bool { objects.contains { $0.isDraft == true } || !draftInk.isEmpty }
+
+    func setChatPanelOpen(_ open: Bool) {
+        guard !isReadOnly else { return }
+        manifest.chatPanelOpen = open
+        metadataChanged()
+    }
+
+    func clearChat() {
+        guard !isReadOnly else { return }
+        var history = chatHistory
+        history.messages = []
+        base.chat = history
+        metadataChanged()
+    }
+
+    func applyChatAnswer(_ next: EditorSnapshot, history: AgentChatHistory, requestId: UUID) {
+        guard !isReadOnly else { return }
+        base.chat = history
+        // Duplicate suppression survives undo and New chat.
+        var conversation = conversation
+        conversation.appliedRequests.append(AppliedRequest(requestId: requestId, appliedAt: Date()))
+        base.conversation = conversation
+        metadataChanged()
+        commit(next, named: "Chat drafts")
+    }
+
+    func acceptAllDrafts() {
+        var next = snapshot
+        for i in next.objects.indices where next.objects[i].isDraft == true { next.objects[i].isDraft = nil }
+        next.draftInk = []
+        commit(next, named: "Accept drafts")
+    }
+
+    func discardAllDrafts() {
+        var next = snapshot
+        next.objects.removeAll { $0.isDraft == true }
+        let dates = Set(next.draftInk.map(\.strokeDate))
+        next.drawing = PKDrawing(strokes: next.drawing.strokes.filter { !dates.contains($0.path.creationDate) })
+        next.draftInk = []
+        commit(next, named: "Discard drafts")
+    }
+
     // MARK: - Saving
 
     func makeDocument() -> Document {
@@ -305,6 +377,11 @@ final class EditorSession {
         document.manifest = manifest
         document.pages = pages
         document.objects = objects
+        if document.chat != nil || !draftInk.isEmpty {
+            var history = chatHistory
+            history.draftInk = draftInk
+            document.chat = history
+        }
         document.ink = layout.decompose(drawing).compactMapValues { $0.strokes.isEmpty ? nil : $0.dataRepresentation() }
         document.thumbnail = ThumbnailRenderer.render(document, assetsURL: store.rootURL
             .appendingPathComponent(document.id.uuidString + "." + DocumentSchema.packageExtension)
@@ -342,10 +419,12 @@ final class EditorSession {
     private func performSave() async {
         guard !isReadOnly, !stopped, hasUnsavedChanges else { return }
         let document = makeDocument()
+        let metadata = metadataGeneration
         saveState = .saving
         do {
             let receipt = try await store.save(document, expectedRevision: savedRevision)
             savedRevision = receipt.revision
+            savedMetadataGeneration = metadata
             manifest.updatedAt = receipt.updatedAt
             base.migratedFrom = nil
             saveState = hasUnsavedChanges ? .pending : .saved

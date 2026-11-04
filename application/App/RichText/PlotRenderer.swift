@@ -14,15 +14,15 @@ enum PlotRenderer {
 
     static func height(width: CGFloat) -> CGFloat { (width * aspect).rounded() }
 
-    static func image(_ spec: PlotSpec, size: CGSize, density: CGFloat, handwritten: Bool) -> UIImage {
+    static func image(_ spec: PlotSpec, size: CGSize, density: CGFloat, handwritten: Bool, appearance: AIAnswerAppearance? = nil) -> UIImage {
         let rendererFormat = UIGraphicsImageRendererFormat()
         rendererFormat.scale = min(8, max(1, density))
         let expressions = spec.functions.compactMap { try? MathExpression($0) }
         let xs = (0...samples).map { spec.xRange.lowerBound + (spec.xRange.upperBound - spec.xRange.lowerBound) * Double($0) / Double(samples) }
         let values = expressions.map { expression in xs.map { (try? expression.evaluate(x: $0)).flatMap { $0.isFinite ? $0 : nil } } }
         let yRange = spec.yRange ?? autoRange(values.flatMap { $0.compactMap { $0 } })
-        let labelFont = handwritten ? RichTextRenderer.handwrittenFont(size: 13) : UIFont.systemFont(ofSize: 11)
-        let titleFont = handwritten ? RichTextRenderer.handwrittenFont(size: 17, bold: true) : UIFont.boldSystemFont(ofSize: 14)
+        let labelFont = handwritten ? RichTextRenderer.font(appearance, size: 13) : UIFont.systemFont(ofSize: 11)
+        let titleFont = handwritten ? RichTextRenderer.font(appearance, size: 17, bold: true) : UIFont.boldSystemFont(ofSize: 14)
 
         return UIGraphicsImageRenderer(size: size, format: rendererFormat).image { context in
             let cg = context.cgContext
@@ -70,7 +70,7 @@ enum PlotRenderer {
             cg.setLineCap(.round)
             let span = yRange.upperBound - yRange.lowerBound
             for (index, series) in values.enumerated() {
-                cg.setStrokeColor(curveColors[index % curveColors.count].cgColor)
+                cg.setStrokeColor((appearance.map { _ in RichTextRenderer.ink(appearance) } ?? curveColors[index % curveColors.count]).cgColor)
                 var previous: Double?
                 for (x, value) in zip(xs, series) {
                     guard let value, abs(value - yRange.lowerBound) < span * 20, abs(value - yRange.upperBound) < span * 20 else {
@@ -89,7 +89,7 @@ enum PlotRenderer {
                 var y = chart.minY + 4
                 for (index, function) in spec.functions.enumerated() {
                     let text = NSString(string: "y = " + function)
-                    let attributes: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: curveColors[index % curveColors.count]]
+                    let attributes: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: (appearance.map { _ in RichTextRenderer.ink(appearance) } ?? curveColors[index % curveColors.count])]
                     let width = text.size(withAttributes: attributes).width
                     text.draw(at: CGPoint(x: chart.maxX - width - 4, y: y), withAttributes: attributes)
                     y += labelFont.lineHeight + 2

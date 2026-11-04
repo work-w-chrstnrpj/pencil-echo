@@ -47,7 +47,11 @@ struct DocumentSummary: Equatable, Identifiable, Sendable {
     var type: DocumentType?
     /// The document title, or the folder name for a package that can't be read.
     var title: String
+    var createdAt: Date?
     var updatedAt: Date?
+    /// Library metadata (ticket 022); absent in packages written before it.
+    var lastOpenedAt: Date?
+    var isFavorite: Bool
     var state: State
 
     var id: URL { packageURL }
@@ -66,6 +70,7 @@ actor DocumentStore {
         static let pages = "pages.json"
         static let objects = "objects.json"
         static let conversation = "conversation.json"
+        static let chat = "chat.json"
         static let thumbnail = "thumbnail.png"
         static let ink = "ink"
         static let assets = "assets"
@@ -145,24 +150,59 @@ actor DocumentStore {
     func rename(id: UUID, to title: String) throws -> SaveReceipt {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title.count <= DocumentLimits.maxTitleLength else { throw DocumentStoreError.invalidTitle }
-        var manifest = try load(id: id).document.manifest
-        let live = packageURL(for: id)
-        if manifest.title == title {
-            return SaveReceipt(revision: manifest.revision, updatedAt: manifest.updatedAt, packageURL: live)
+        let existing = try load(id: id).document.manifest
+        if existing.title == title {
+            return SaveReceipt(revision: existing.revision, updatedAt: existing.updatedAt,
+                               packageURL: packageURL(for: id))
         }
-        manifest.title = title
-        manifest.updatedAt = Date()
-        // Rename is metadata-only. Clone the original package so unreadable optional
-        // files, ink, assets and unknown files are preserved byte-for-byte.
+        return try updateManifest(id: id) { json in
+            json["title"] = title
+            json["updatedAt"] = DocumentCoding.string(from: Date())
+        }
+    }
+
+    /// Library metadata only (ticket 022). Favorites do not change `revision` or `updatedAt`.
+    @discardableResult
+    func setFavorite(id: UUID, isFavorite: Bool) throws -> SaveReceipt {
+        try updateManifest(id: id) { json in json["isFavorite"] = isFavorite }
+    }
+
+    /// Records an open for the library's Recent section. It does not change `updatedAt`,
+    /// which stays the last content/title edit date.
+    @discardableResult
+    func recordOpened(id: UUID, at date: Date = Date()) throws -> SaveReceipt {
+        try updateManifest(id: id) { json in json["lastOpenedAt"] = DocumentCoding.string(from: date) }
+    }
+
+    /// Clones the live package, mutates only the manifest keys the caller names and
+    /// swaps it in atomically. Working on the decoded JSON instead of a typed manifest
+    /// keeps unknown manifest keys, untouched date strings and every other file byte
+    /// exactly as they were: `revision` and `updatedAt` only change when a caller
+    /// changes them explicitly.
+    private func updateManifest(id: UUID, _ change: (inout [String: Any]) -> Void) throws -> SaveReceipt {
+        let live = packageURL(for: id)
+        guard let current = Self.readJSONObject(live.appendingPathComponent(FileName.manifest)) else {
+            throw DocumentStoreError.damaged(FileName.manifest)
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: current),
+              let typed = try? DocumentCoding.decoder().decode(DocumentManifest.self, from: data),
+              typed.schemaVersion <= DocumentSchema.currentVersion,
+              UUID(uuidString: live.deletingPathExtension().lastPathComponent) == typed.id else {
+            throw DocumentStoreError.damaged(FileName.manifest)
+        }
+        var json = current
+        change(&json)
         let fm = FileManager.default
         let staging = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: rootURL, create: true)
         lastStagingRoot = staging
         defer { try? fm.removeItem(at: staging) }
         let replacement = staging.appendingPathComponent(live.lastPathComponent, isDirectory: true)
         try fm.copyItem(at: live, to: replacement)
-        try writer.write(DocumentCoding.encoder().encode(manifest), replacement.appendingPathComponent(FileName.manifest))
+        let manifest = try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys, .prettyPrinted])
+        try writer.write(manifest, replacement.appendingPathComponent(FileName.manifest))
         _ = try fm.replaceItemAt(live, withItemAt: replacement)
-        return SaveReceipt(revision: manifest.revision, updatedAt: manifest.updatedAt, packageURL: live)
+        let updatedAt = (json["updatedAt"] as? String).flatMap(DocumentCoding.date(from:)) ?? typed.updatedAt
+        return SaveReceipt(revision: typed.revision, updatedAt: updatedAt, packageURL: live)
     }
 
     // MARK: - Save
@@ -221,6 +261,12 @@ actor DocumentStore {
         let encoder = DocumentCoding.encoder()
         try writer.write(encoder.encode(PagesFile(pages: document.pages)), staged.appendingPathComponent(FileName.pages))
         try writer.write(encoder.encode(ObjectsFile(objects: document.objects)), staged.appendingPathComponent(FileName.objects))
+        if let chat = document.chat {
+            guard chat.isValid else { throw DocumentStoreError.damaged(FileName.chat) }
+            let data = try encoder.encode(chat)
+            guard data.count <= AgentChatHistory.maxFileBytes else { throw DocumentStoreError.damaged(FileName.chat) }
+            try writer.write(data, staged.appendingPathComponent(FileName.chat))
+        }
         if let conversation = document.conversation {
             try writer.write(encoder.encode(conversation), staged.appendingPathComponent(FileName.conversation))
         }
@@ -323,6 +369,16 @@ actor DocumentStore {
         let manifest: DocumentManifest = try Self.decode(raw, FileName.manifest)
         let pages = (try Self.decode(raw, FileName.pages) as PagesFile).pages
         let objects = (try Self.decode(raw, FileName.objects) as ObjectsFile).objects
+        var chat: AgentChatHistory?
+        let chatURL = url.appendingPathComponent(FileName.chat)
+        if fileManager.fileExists(atPath: chatURL.path) {
+            if let size = (try? fileManager.attributesOfItem(atPath: chatURL.path)[.size]) as? Int,
+               size <= AgentChatHistory.maxFileBytes,
+               let data = try? Data(contentsOf: chatURL),
+               let decoded = try? DocumentCoding.decoder().decode(AgentChatHistory.self, from: data), decoded.isValid {
+                chat = decoded
+            } else { issues.append(.optionalFileUnreadable(FileName.chat)) }
+        }
         var conversation: Conversation?
         if raw.files[FileName.conversation] != nil {
             if let decoded: Conversation = try? Self.decode(raw, FileName.conversation) {
@@ -379,7 +435,7 @@ actor DocumentStore {
         }
 
         let document = Document(manifest: manifest, pages: pages, objects: objects, ink: ink,
-                                conversation: conversation, thumbnail: thumbnail, migratedFrom: migratedFrom)
+                                conversation: conversation, chat: chat, thumbnail: thumbnail, migratedFrom: migratedFrom)
         return LoadedDocument(document: document, issues: issues)
     }
 
@@ -413,7 +469,8 @@ actor DocumentStore {
         let summaries = urls.filter { $0.pathExtension == DocumentSchema.packageExtension }.map { url -> DocumentSummary in
             let folderName = url.deletingPathExtension().lastPathComponent
             var summary = DocumentSummary(packageURL: url, documentId: UUID(uuidString: folderName), type: nil,
-                                          title: folderName, updatedAt: nil, state: .damaged)
+                                          title: folderName, createdAt: nil, updatedAt: nil, lastOpenedAt: nil,
+                                          isFavorite: false, state: .damaged)
             let manifestURL = url.appendingPathComponent(FileName.manifest)
             guard let json = Self.readJSONObject(manifestURL), let version = json["schemaVersion"] as? Int else {
                 return summary
@@ -427,7 +484,10 @@ actor DocumentStore {
             summary.documentId = manifest.id
             summary.type = manifest.type
             summary.title = manifest.title
+            summary.createdAt = manifest.createdAt
             summary.updatedAt = manifest.updatedAt
+            summary.lastOpenedAt = manifest.lastOpenedAt
+            summary.isFavorite = manifest.isFavorite ?? false
             summary.state = .ok
             return summary
         }

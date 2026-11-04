@@ -23,6 +23,7 @@ protocol NativeStreamAccumulator: Sendable {
 enum NativeProviderSupport {
     /// All untrusted request checks precede credentials and networking.
     static func validate(_ request: AIRequest, preset: ProviderPreset) throws -> (ModelCapabilities, [String], [String: Any]?) {
+        try AIChatMessage.validate(request.history)
         guard let model = preset.defaultModels.first(where: { $0.id == request.model })?.capabilities,
               model.streaming else { throw AIError.unsupportedModel }
         guard request.model.utf8.count <= 256, !request.model.isEmpty,

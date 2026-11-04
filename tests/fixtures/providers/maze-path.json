@@ -1,0 +1,18 @@
+{
+  "version": 3,
+  "operations": [
+    {
+      "op": "draw_ink",
+      "coordinates": "page",
+      "width": null,
+      "height": null,
+      "strokes": [
+        {"kind": "polyline", "points": [[100, 100], [180, 110], [180, 160]], "closed": false, "color": "red", "size": 4}
+      ],
+      "labels": [],
+      "placement": "at_frame",
+      "frame": null
+    }
+  ],
+  "message": "A path through the maze."
+}

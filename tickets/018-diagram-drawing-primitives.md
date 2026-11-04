@@ -1,6 +1,6 @@
 # 018 — Diagram drawing: arrowheads, arcs, wavy lines and labels
 
-Milestone: PE-003 · Status: Open · Owner: Unassigned · Depends on: 016
+Milestone: PE-003 · Status: In Progress — fixture-tested on the iPad (A16) simulator (2026-11-05); owner A16 run with a real provider pending · Owner: Grok · Depends on: 016
 
 ## What
 
@@ -39,8 +39,8 @@ Upstream `draw` has `line|smooth|rect|ellipse|circle|arc` items with `closed`, `
 
 - [ ] The Feynman diagram request above places a diagram with two incoming fermion lines with arrows, a wavy photon line between two vertices, two outgoing lines and readable particle labels next to each line. *(Real provider, A16.)*
 - [ ] "Draw a free-body diagram of a block on an incline" places labeled force arrows. *(Real provider.)*
-- [ ] A drawing and its labels are one undo step, and labels stay editable.
-- [ ] Malformed or over-limit `arc`, `wave`, `zigzag`, arrow and label values are rejected with nothing changed. *(Validator tests.)*
+- [x] A drawing and its labels are one undo step, and labels stay editable. *(Simulator: `aDrawingAndItsLabelsAreOneUndoStep`. Labels are ordinary text/LaTeX objects.)*
+- [x] Malformed or over-limit `arc`, `wave`, `zigzag`, arrow and label values are rejected with nothing changed. *(Validator tests.)*
 
 ## Automated checks
 
@@ -56,3 +56,7 @@ Owner A16 run with a real provider for the Feynman and free-body diagram prompts
 ## Stop conditions
 
 Stop and ask the owner if models can't produce usable coordinates for labeled diagrams even with these primitives; the fallback is the PE-006 widget renderer, which is a larger scope change.
+
+## Implementation notes (2026-11-05)
+
+Version 3 `draw_ink` adds `arc`, `rect`, `wave` and `zigzag`, plus `arrow`, `fill` and up to 16 labels of 40 bytes. Waves and zigzags expand on device; the 64-stroke / 2,048-point budget applies after expansion. Version 1 and 2 answers still validate. Labels are ordinary text or LaTeX objects in the same undo group as the ink, so `document-schema-v1` did not change. Placed AI ink is recolored to the canvas AI ink color at apply time. The recorded Feynman fixture validates and places the drawing plus five labels. Evidence: [diagrams-018-019.md](../docs/testing/diagrams-018-019.md). Real-provider Feynman and free-body runs were not done.

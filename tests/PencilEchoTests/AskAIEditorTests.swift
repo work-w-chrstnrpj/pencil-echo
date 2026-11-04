@@ -77,6 +77,19 @@ final class AskAIEditorTests {
         #expect(session.objects.count == 2)
     }
 
+    @Test func aDrawingAndItsLabelsAreOneUndoStep() async throws {
+        let answer = #"{"version":3,"operations":[{"op":"draw_ink","width":120,"height":80,"strokes":[{"kind":"line","points":[[10,40],[110,40]],"closed":false,"color":"black","size":3,"arrow":"end"}],"labels":[{"kind":"latex","text":"\\gamma","x":50,"y":24}],"placement":"right_of_scope","frame":null}],"message":"Labeled."}"#
+        let session = try await openNotebook()
+        let before = session.drawing.strokes.count
+        _ = try await ask(session, answer: answer)
+        #expect(session.objects.count == 1 && session.objects[0].type == .latex && session.objects[0].source == #"\gamma"#)
+        #expect(session.drawing.strokes.count > before)
+        #expect(session.manager.undoActionName == "AI Answer")
+        session.manager.undo()
+        try await nextEvent()
+        #expect(session.objects.isEmpty && session.drawing.strokes.count == before)
+    }
+
     @Test func savedAnswerReopensAndUndoneAnswerStaysGone() async throws {
         let session = try await openNotebook()
         _ = try await ask(session)

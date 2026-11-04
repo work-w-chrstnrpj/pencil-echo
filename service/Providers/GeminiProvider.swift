@@ -20,12 +20,16 @@ struct GeminiProvider: AIProvider {
         var parts: [[String: Any]] = images.map { ["inlineData": ["mimeType": "image/png", "data": $0]] }
         parts.append(["text": request.instruction])
         var config: [String: Any] = ["maxOutputTokens": 4_096]
+        if let effort = request.reasoning, ReasoningLevel.supports(preset: preset.id, model: request.model) {
+            config["thinkingConfig"] = ["thinkingBudget": effort.budget]
+            config["maxOutputTokens"] = 4096 + effort.budget
+        }
         if let schema, model.structuredOutput == .jsonSchema {
             config["responseMimeType"] = "application/json"
             config["responseSchema"] = try Self.responseSchema(schema)
         }
         let body: [String: Any] = ["systemInstruction": ["parts": [["text": NativeProviderSupport.system(request)]]],
-                                  "contents": [["role": "user", "parts": parts]], "generationConfig": config]
+                                  "contents": request.history.map { ["role": $0.role == .assistant ? "model" : "user", "parts": [["text": $0.text]]] as [String: Any] } + [["role": "user", "parts": parts]], "generationConfig": config]
         return try NativeProviderSupport.authorized(body, url: url, preset: preset, credentials: credentials)
     }
 

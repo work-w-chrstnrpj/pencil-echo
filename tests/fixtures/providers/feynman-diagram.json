@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "operations": [
+    {
+      "op": "draw_ink",
+      "width": 320,
+      "height": 220,
+      "strokes": [
+        {"kind": "line", "points": [[30, 40], [110, 110]], "closed": false, "color": "black", "size": 3, "arrow": "mid"},
+        {"kind": "line", "points": [[30, 180], [110, 110]], "closed": false, "color": "black", "size": 3, "arrow": "mid"},
+        {"kind": "wave", "points": [[110, 110], [210, 110]], "closed": false, "color": "blue", "size": 3, "amplitude": 12, "wavelength": 18},
+        {"kind": "line", "points": [[210, 110], [290, 40]], "closed": false, "color": "black", "size": 3, "arrow": "mid"},
+        {"kind": "line", "points": [[210, 110], [290, 180]], "closed": false, "color": "black", "size": 3, "arrow": "mid"}
+      ],
+      "labels": [
+        {"kind": "latex", "text": "e^-", "x": 24, "y": 28},
+        {"kind": "latex", "text": "e^+", "x": 24, "y": 190},
+        {"kind": "latex", "text": "\\gamma", "x": 150, "y": 78},
+        {"kind": "latex", "text": "\\mu^-", "x": 250, "y": 28},
+        {"kind": "latex", "text": "\\mu^+", "x": 250, "y": 190}
+      ],
+      "placement": "right_of_scope",
+      "frame": null
+    }
+  ],
+  "message": "Electron-positron annihilation to muons."
+}

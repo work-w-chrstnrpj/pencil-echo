@@ -2,6 +2,8 @@
 // Translated and trimmed to canvas commands v1 (docs/api/canvas-commands-v1.md, "Prompt contract").
 // Focus/context regions and pen-gesture rules: ticket 017, from the same file's spatial editing
 // rules (line 127) and latestInput/captureRect contract (line 720).
+// Diagram stroke kinds, arrowheads and labels: ticket 018, from the draw encoding at line 148.
+// Page-coordinate overlays and the magnified focus image: ticket 019, from focusInset (line 123).
 import Foundation
 
 /// Prompt text for one Ask AI request (ticket 010).
@@ -16,9 +18,11 @@ enum CanvasCommandPrompt {
     it, holds the newest input: that is what to respond to. Everything outside focusFrame is earlier \
     work, shown only so you can tell what the newest input refers to, such as the drawing a short note \
     points at or the step a circle surrounds. Never answer, repeat or redo earlier work unless the \
-    newest input asks about it.
+    newest input asks about it. When a second image is attached, it is a magnified copy of focusFrame \
+    for reading thin detail, such as maze walls. It is the same ink, not more of the page. Use \
+    focusImageScale for that image only: pageX = focusFrame.x + imageX / focusImageScale.
 
-    Return exactly one JSON object that matches the supplied schema (version 2). No prose, no Markdown \
+    Return exactly one JSON object that matches the supplied schema (version 3). No prose, no Markdown \
     fences, no alternatives.
 
     Treat the page as an existing document to extend. Respond to the meaning and intent of the written \
@@ -45,8 +49,22 @@ enum CanvasCommandPrompt {
     local box (for example width 300, height 240), y down, and draw clean line art in it with smooth \
     curves for round shapes, ellipse for circles and eyes, line and polyline for straight edges. Use \
     about 8 to 40 strokes with well-spaced points, size about 3, black outlines and a few colored \
-    details. Draw the whole subject recognizably; label parts with separate text objects only when \
-    asked. To mark existing work (circle, underline, arrow), use draw_ink with at_frame over it.
+    details. Draw the whole subject recognizably. For a labeled diagram (Feynman, free-body, circuit, \
+    flowchart or geometry), use the diagram strokes: arc is center [x, y], radiusX, radiusY, startAngle \
+    and sweep in degrees, with points []; 0 degrees points right and positive sweep goes clockwise. \
+    rect is two opposite corners. wave and zigzag follow the polyline in points, with amplitude and \
+    wavelength; send the spine, not every wiggle. A photon is a wave; a gluon is a wave with a short \
+    wavelength. arrow is none, end, start, both, or mid (a fermion arrow halfway along the line). \
+    fill true paints a closed shape. Put each short label in labels, {kind: text or latex, text, x, y} \
+    in the same box, at most 16 labels of 40 bytes, so the label stays next to its line. Unused stroke \
+    fields are null, arrow is none and fill is false. To mark existing work (circle, underline, arrow), \
+    use draw_ink with at_frame over it.
+
+    Drawing on top of existing ink (a path through a maze, a tangent, an angle mark) uses coordinates \
+    page. Points are page points inside pageBounds and near captureFrame. width and height are null, \
+    placement is at_frame and frame is null. Trace open space such as corridors and gaps. Do not cross \
+    existing strokes unless the request asks you to. Use one continuous stroke from the marked start \
+    to the marked end.
 
     Pen gestures (ported from the upstream spatial editing rules): read hand-drawn marks in the newest \
     input as instructions, not as text. A circle or box around content selects or references it. An \
@@ -74,18 +92,19 @@ enum CanvasCommandPrompt {
     /// The user turn: instruction plus the geometry the model needs for `at_frame`.
     /// `focusFrame` is the newest input inside the capture (ticket 017); nil means the whole capture.
     static func instruction(_ text: String, context: CommandRequestContext, imageScale: Double,
-                            focusFrame: CommandFrame? = nil) -> String {
+                            focusFrame: CommandFrame? = nil, focusImageScale: Double? = nil) -> String {
         func rect(_ frame: CommandFrame) -> [String: Double] {
             ["x": frame.x, "y": frame.y, "width": frame.width, "height": frame.height]
         }
-        let request: [String: Any] = [
-            "schemaVersion": 2,
+        var request: [String: Any] = [
+            "schemaVersion": 3,
             "captureFrame": rect(context.scopeFrame),
             "focusFrame": rect(focusFrame ?? context.scopeFrame),
             "imageScale": imageScale,
             "pageBounds": rect(context.pageBounds),
             "allowReplace": context.allowReplace,
         ]
+        if let focusImageScale { request["focusImageScale"] = focusImageScale }
         let json = (try? JSONSerialization.data(withJSONObject: request, options: [.sortedKeys]))
             .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -103,5 +122,11 @@ enum CanvasCommandPrompt {
             body = String(body[body.index(after: newline)...])
         }
         return body.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+extension CanvasCommandPrompt {
+    static var chatSystem: String {
+        system + "\nThis is a typed conversation about the current image. Use recent messages to understand follow-up questions; old images are not included. Put the worked reply in the JSON message string (up to 4096 UTF-8 bytes), and editable additions in operations. Commands are drafts for user review. Only text, math, plots and ink are supported; if asked for animations, simulations or widgets, explain that limitation and offer a static answer. Never edit or delete existing work."
     }
 }

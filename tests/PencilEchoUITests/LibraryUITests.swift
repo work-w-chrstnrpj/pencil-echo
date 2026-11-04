@@ -127,6 +127,140 @@ final class LibraryUITests: XCTestCase {
         app.terminate()
     }
 
+    func testFavoriteSearchAndListLayoutSurviveRelaunch() {
+        let app = application()
+        app.launch()
+        app.buttons["New Canvas"].firstMatch.tap()
+        closeEditor(app)
+
+        let canvas = card(app, title: "Untitled Canvas")
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        // Normalize the layout remembered from any earlier run.
+        if app.descendants(matching: .any)["library-list"].firstMatch.exists {
+            app.buttons["library-layout-toggle"].tap()
+        }
+        XCTAssertTrue(app.descendants(matching: .any)["library-grid"].firstMatch.waitForExistence(timeout: 5))
+        canvas.press(forDuration: 1)
+        app.buttons["Add to Favorites"].firstMatch.tap()
+
+        let favorites = app.descendants(matching: .any)["library-sidebar-favorites"].firstMatch
+        XCTAssertTrue(favorites.waitForExistence(timeout: 5))
+        favorites.tap()
+        XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
+        let starred = XCTAttachment(screenshot: app.screenshot())
+        starred.name = "022-library-favorites"
+        starred.lifetime = .keepAlways
+        add(starred)
+
+        // Search filters the selected section as the query is typed.
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Untitled")
+        XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
+        search.typeText(" missing")
+        XCTAssertTrue(card(app, title: "Untitled Canvas").waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No Results"].waitForExistence(timeout: 5))
+        let typed = search.value as? String ?? ""
+        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
+        XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
+
+        // Switch to the list layout and keep the same row identifier.
+        app.buttons["library-layout-toggle"].tap()
+        let list = app.descendants(matching: .any)["library-list"].firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        XCTAssertTrue(card(app, title: "Untitled Canvas").exists)
+        let listed = XCTAttachment(screenshot: app.screenshot())
+        listed.name = "022-library-list"
+        listed.lifetime = .keepAlways
+        add(listed)
+
+        // Relaunch: the list layout and the favorite survive.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["library-list"].firstMatch.waitForExistence(timeout: 5))
+        app.descendants(matching: .any)["library-sidebar-favorites"].firstMatch.tap()
+        XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
+        let afterRelaunch = XCTAttachment(screenshot: app.screenshot())
+        afterRelaunch.name = "022-library-list-after-relaunch"
+        afterRelaunch.lifetime = .keepAlways
+        add(afterRelaunch)
+    }
+
+    func testEditorShellControls() {
+        let app = application()
+        app.launch()
+        app.buttons["New Canvas"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Auto Ask"].waitForExistence(timeout: 10))
+        app.buttons["Auto Ask"].tap()
+        app.buttons["Pause delay"].tap()
+        XCTAssertTrue(app.steppers.firstMatch.waitForExistence(timeout: 5))
+        app.steppers.buttons["Increment"].firstMatch.tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.7)).tap()
+        app.buttons["editor-rename"].tap()
+        let field = app.alerts.textFields.firstMatch
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (field.value as? String ?? "").count) + "Shell journey")
+        app.alerts.buttons["Rename"].tap()
+        app.buttons["Toggle grid"].tap()
+        app.buttons["Fullscreen"].tap()
+        XCTAssertTrue(app.buttons["Show controls"].waitForExistence(timeout: 5))
+        app.buttons["Show controls"].tap()
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Canvas preferences"].waitForExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "020-regular-settings"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.navigationBars["AI Settings"].buttons["Done"].tap()
+        closeEditor(app)
+        XCTAssertTrue(card(app, title: "Shell journey").waitForExistence(timeout: 5))
+        card(app, title: "Shell journey").tap()
+        XCTAssertEqual(app.buttons["Toggle grid"].value as? String, "Off")
+        closeEditor(app)
+    }
+
+    func testChatFixtureAcceptReopenAndClear() {
+        let app = application()
+        app.launchArguments.append("-chatFixture")
+        app.launch()
+        app.buttons["New Canvas"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Agent chat"].waitForExistence(timeout: 10))
+        app.buttons["Agent chat"].tap()
+        let input = app.descendants(matching: .any)["chat-input"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.tap(); input.typeText("Solve the time of descent")
+        app.buttons["Send"].tap()
+        XCTAssertTrue(app.buttons["Accept all"].firstMatch.waitForExistence(timeout: 15))
+        let draft = XCTAttachment(screenshot: app.screenshot())
+        draft.name = "021-chat-drafts"; draft.lifetime = .keepAlways; add(draft)
+        app.buttons["Accept all"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Accept all"].firstMatch.waitForNonExistence(timeout: 5))
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
+        card(app, title: "Untitled Canvas").tap()
+        XCTAssertTrue(app.staticTexts["Solve the time of descent"].waitForExistence(timeout: 10))
+        app.buttons["New chat"].tap()
+        XCTAssertTrue(app.staticTexts["Solve the time of descent"].waitForNonExistence(timeout: 5))
+        app.buttons["Close"].tap()
+        closeEditor(app)
+    }
+
+    func testCompactSettingsSheet() {
+        let app = application()
+        app.launchArguments.append("-editorCompactWidth")
+        app.launch()
+        app.buttons["New Canvas"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10))
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.navigationBars["AI Settings"].waitForExistence(timeout: 5))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "020-forced-compact-settings-sheet"; screenshot.lifetime = .keepAlways; add(screenshot)
+        app.navigationBars["AI Settings"].buttons["Done"].tap()
+        closeEditor(app)
+    }
+
     func testDamagedPackageAndAccessibilityTextSize() {
         let app = application(damaged: true, largeText: true)
         app.launch()

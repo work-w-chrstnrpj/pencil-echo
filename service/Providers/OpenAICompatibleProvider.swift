@@ -79,6 +79,7 @@ struct OpenAICompatibleProvider: AIProvider {
 
     /// Capability and size gates precede credential access and transport creation.
     func makeRequest(_ request: AIRequest) throws -> URLRequest {
+        try AIChatMessage.validate(request.history)
         guard preset.authStyle == .bearer else { throw AIError.invalidRequest }
         guard let model = capabilities(model: request.model), model.streaming else { throw AIError.unsupportedModel }
         if !request.pngImages.isEmpty && !model.vision { throw AIError.modelLacksVision }
@@ -92,6 +93,9 @@ struct OpenAICompatibleProvider: AIProvider {
         body[quirks.contains(.maxCompletionTokens) ? "max_completion_tokens" : "max_tokens"] = 4_096
         if !quirks.contains(.noStreamUsage) { body["stream_options"] = ["include_usage": true] }
         if quirks.contains(.disableThinking) { body["enable_thinking"] = false }
+        if let effort = request.reasoning, ReasoningLevel.supports(preset: preset.id, model: request.model) {
+            body["reasoning_effort"] = effort == .off ? "none" : effort.rawValue
+        }
         var system = request.systemPrompt
         if let schema = request.jsonSchema {
             guard schema.count <= 64 * 1_024, let json = try? JSONSerialization.jsonObject(with: schema),
@@ -109,6 +113,7 @@ struct OpenAICompatibleProvider: AIProvider {
         if quirks.contains(.noSystemRole) {
             content.insert(["type": "text", "text": system], at: 0)
         } else { messages.append(["role": "system", "content": system]) }
+        messages += request.history.map { ["role": $0.role.rawValue, "content": $0.text] }
         messages.append(["role": "user", "content": content])
         body["messages"] = messages
         let payload = try JSONSerialization.data(withJSONObject: body)

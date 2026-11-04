@@ -80,7 +80,7 @@ enum ThumbnailRenderer {
                 UIBezierPath(rect: rect).fill()
             }
         case .markdown, .latex, .plot:
-            RichTextRenderer.draw(source: object.source, type: object.type, in: rect, handwritten: object.rendersHandwritten)
+            RichTextRenderer.draw(source: object.source, type: object.type, in: rect, handwritten: object.rendersHandwritten, appearance: object.aiAppearance)
         case .text where object.rendersHandwritten:
             RichTextRenderer.draw(source: object.source, type: object.type, in: rect, handwritten: true)
         case .text:

@@ -25,6 +25,8 @@ The VL aliases above support JSON-object output in non-thinking mode. JSON-objec
 
 The vision examples cover qwen3-vl-plus, Base64 data URLs and streaming. The implementation accepts PNG only and uses a conservative **5,000,000-byte local per-image cap**, below the documented legacy Base64 guidance of less than 7 MB; this is an application limit, not the provider's maximum. It also caps image dimensions at 8,192 per side / 16,777,216 pixels, two images and a 14 MiB serialized request. These limits can be tightened or refined per model later. [Alibaba image/video understanding](https://www.alibabacloud.com/help/en/model-studio/vision).
 
+Ask AI may attach a second PNG when the newest ink is small beside the captured context (ticket 019). The first image is the context region. The second is a magnified copy of the attention region, for reading detail, and it is omitted when that copy would exceed the per-image cap. OpenAI-compatible, Anthropic and Gemini adapters already accept two images and keep that order. No current adapter is limited to one image, so the focus image is not skipped for a protocol reason.
+
 These are explicit model entries, not family-name heuristics. Regional entitlements and alias availability must be proved with the owner's account. Unknown models fail closed until a verified capability entry exists; model discovery, free-text model entry, custom endpoints and other providers are ticket 012/013 work. Preset and per-model quirks remain data, with no Qwen branches in the adapter.
 
 ## Implemented service boundary
@@ -153,3 +155,23 @@ Logs: `/tmp/pencilecho-013-unit-final.log` and `/tmp/pencilecho-013-release-fina
 ### Owner live acceptance
 
 For each provider the owner holds a key for: choose its native preset in AI Settings, save an endpoint-scoped key on the iPad, run Test connection, then write `2x + 3 = 11`, select it and tap Ask AI. Confirm an editable answer, one undo, successful reopen and manual cancellation/retry. Record provider/model, endpoint region, physical device and result here without keys, prompts, images or raw response bodies. Until separately recorded, both native providers remain **not verified**.
+
+## Editor reasoning controls (020)
+
+Reasoning is optional and saved per provider (`ProviderSettings.reasoning`). Omitted values preserve previous requests. The app only shows/sends the menu for an explicit model allowlist; a vision override does not imply reasoning support.
+
+| Adapter / model allowlist | Off | Low / Medium / High |
+|---|---|---|
+| OpenAI: gpt-5.1, gpt-5.2 | `reasoning_effort: none` | `low`, `medium`, `high` |
+| Anthropic: claude-sonnet-4-5, claude-sonnet-4-6, claude-opus-4-5 | `thinking.type: disabled` | `thinking.type: enabled`, budget_tokens 1024 / 4096 / 8192 |
+| Gemini: gemini-2.5-flash, gemini-2.5-flash-lite | thinkingBudget 0 | thinkingBudget 1024 / 4096 / 8192 |
+
+Native thinking budgets add to the 4096 output allowance. Unknown models, routers, Qwen, and current newer native suggestions omit these parameters. Their distinct thinking controls need separate model-specific verification. No raw thinking is exposed, stored, or replayed. The completed JSON still passes the same command validator. No real-provider acceptance is implied by request-body tests.
+
+Contracts checked 2026-11-04: [OpenAI reasoning](https://developers.openai.com/api/docs/guides/reasoning), [Claude manual extended thinking and constraints](https://platform.claude.com/docs/en/build-with-claude/extended-thinking), [Gemini thinking](https://aistudio.google.com/docs/thinking). Claude 4.7+ rejects legacy budget mode; Gemini 3+ uses levels instead of the 2.5 budget API.
+
+## Typed multi-turn chat (021)
+
+`AIRequest.history` carries at most 20 alternating user/assistant text messages (10 completed turns). Every adapter validates order, count and 16 KB per-message size before key access. OpenAI-compatible and Anthropic use user/assistant messages; Gemini maps assistant to `model` parts. Only the current turn carries the newly captured PNG. The schema and instruction are current system/request context, never embedded as prior user turns. No earlier images or thinking signatures are replayed; this chat has no tool calls.
+
+Chat streams only the JSON envelope's top-level `message` text to the panel; operation JSON stays hidden. Only the completed, successfully terminated response is command-validated. Capture changes hold placement with a resend instruction and preserve the typed request. Invalid, cancelled and late generations place nothing. The selected provider is never silently changed. Fixture runs verify native wire bodies and controller behavior, not live mathematical answer quality.

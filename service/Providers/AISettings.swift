@@ -8,6 +8,7 @@ struct ProviderSettings: Codable, Equatable, Sendable {
     var model: String
     /// User-set vision support per model ID; wins over preset and fetched metadata.
     var visionOverrides: [String: Bool] = [:]
+    var reasoning: ReasoningLevel? = nil
 }
 
 /// AI provider settings (ticket 012). Non-secret, stored in UserDefaults.
@@ -212,6 +213,32 @@ enum ConnectionTest {
             return .invalidOutput
         } catch {
             return AIError.normalized(error)
+        }
+    }
+}
+
+struct CanvasAISettings: Codable, Equatable, Sendable {
+    static let key = "ai.canvas.v1"
+    var appearance = AIAnswerAppearance()
+    var thinkingIndicator = true
+    static func load(_ defaults: UserDefaults = .standard) -> Self {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Self.self, from: $0) } ?? Self()
+    }
+    func save(_ defaults: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.key) }
+    }
+}
+
+enum ReasoningLevel: String, Codable, CaseIterable, Sendable {
+    case off, low, medium, high
+    var budget: Int { switch self { case .off: 0; case .low: 1024; case .medium: 4096; case .high: 8192 } }
+    // Explicit model gates: routers and unknown/new models do not inherit API claims.
+    static func supports(preset: String, model: String) -> Bool {
+        switch preset {
+        case "openai": ["gpt-5.1", "gpt-5.2"].contains(model)
+        case "anthropic": ["claude-sonnet-4-5", "claude-sonnet-4-6", "claude-opus-4-5"].contains(model)
+        case "gemini": ["gemini-2.5-flash", "gemini-2.5-flash-lite"].contains(model)
+        default: false
         }
     }
 }

@@ -1,6 +1,6 @@
 # 019 — Precise ink on existing work (mazes, graphs, geometry)
 
-Milestone: PE-003 · Status: Open · Owner: Unassigned · Depends on: 016, 017
+Milestone: PE-003 · Status: In Progress — fixture-tested on the iPad (A16) simulator (2026-11-05); owner A16 run with a real provider pending · Owner: Grok · Depends on: 016, 017
 
 ## What
 
@@ -39,8 +39,8 @@ Upstream sends a magnified duplicate of the attention region ("focusInset", `ins
 
 - [ ] On a hand-drawn maze of about 6×6 cells, "find path" draws a continuous path from the entry arrow to the exit arrow that stays inside the corridors. *(Real provider, A16. Record how many of 5 tries succeed.)*
 - [ ] "Draw the tangent at x = 1" on a sketched parabola places a line touching the curve near x = 1. *(Real provider.)*
-- [ ] Page-coordinate ink outside the page or far from the context region is rejected with nothing changed. *(Validator tests.)*
-- [ ] Requests with a focus image work for every provider adapter, or the focus image is skipped for providers that accept one image only.
+- [x] Page-coordinate ink outside the page or far from the context region is rejected with nothing changed. *(Validator tests.)*
+- [x] Requests with a focus image work for every provider adapter, or the focus image is skipped for providers that accept one image only. *(Fixture request bodies. OpenAI-compatible, Anthropic and Gemini all accept two images, context then focus. A focus PNG over 5,000,000 bytes is dropped.)*
 
 ## Automated checks
 
@@ -56,3 +56,7 @@ Owner A16 run with a real provider. Accuracy depends on the model; record the mo
 ## Stop conditions
 
 Stop and ask the owner if the selected models solve fewer than 2 of 5 maze tries even with the focus image; the remaining option (the grid hint, or on-device path finding) needs an owner decision.
+
+## Implementation notes (2026-11-05)
+
+A second PNG is attached only when the newest ink's longest side is under half the context image and a magnification up to 3× is actually higher than the context scale. The prompt names `focusImageScale` and says the second image is for reading detail. Page-coordinate ink (`coordinates: "page"`, null width and height, `at_frame`) must stay on the page and within 64 points of the capture; anything else is rejected and nothing changes. The recorded maze fixture lands on the expected page points. The optional capture grid was not added: the ticket waits for real-provider runs before that setting. On-device maze solving was not added. Evidence: [diagrams-018-019.md](../docs/testing/diagrams-018-019.md). No model name or 5-try maze count exists yet because the owner A16 run was not done.

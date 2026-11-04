@@ -24,7 +24,7 @@ final class EditorViewportView: UIView {
 /// The canvas view is the only scrolling surface; the other layers follow its
 /// zoom and offset: viewport = document × zoom − contentOffset.
 @MainActor
-final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UIGestureRecognizerDelegate {
+final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UIGestureRecognizerDelegate, PKToolPickerObserver {
     let session: EditorSession
     private let assetsURL: URL?
     let canvas = EditorCanvasView()
@@ -33,10 +33,54 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
     private let objectContainer = UIView()
     private let selectionOverlay = UIView()
     private let selectionShape = CAShapeLayer()
+    private let draftOutlines = CAShapeLayer()
     private let handleShape = CAShapeLayer()
     private let banner = UILabel()
     private let pageLabel = UILabel()
+    private let thinking = UIActivityIndicatorView(style: .medium)
+    private var thinkingRegion: CGRect?
+    func setThinkingRegion(_ region: CGRect?) {
+        thinkingRegion = region
+        if region == nil { thinking.stopAnimating() } else { thinking.startAnimating() }
+        synchronizeLayers()
+    }
     private let saveLabel = UILabel()
+    private var editorToolbar: UIView?
+    private(set) var handMode = false
+    func setHandMode(_ enabled: Bool) {
+        guard !toolInUse else { return }
+        handMode = enabled
+        canvas.panGestureRecognizer.minimumNumberOfTouches = enabled ? 1 : (selectMode ? 2 : 1)
+        canvas.isDrawingEnabled = !enabled && !selectMode
+        lassoPan.isEnabled = selectMode && !enabled
+        selectTap.isEnabled = selectMode && !enabled
+        canvas.panGestureRecognizer.allowedTouchTypes = enabled ? [NSNumber(value: UITouch.TouchType.direct.rawValue), NSNumber(value: UITouch.TouchType.pencil.rawValue)] : [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+    }
+    func setFullscreen(_ enabled: Bool) { editorToolbar?.isHidden = enabled }
+    func exportCurrentPage() -> Data {
+        let index = currentPageIndex
+        let page = session.pages[index], frame = session.layout.pageRect(index)
+        // Bounded export even when a canvas has grown to 20,000 points.
+        let scale = min(1, 4096 / max(frame.width, frame.height))
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        return UIGraphicsImageRenderer(size: CGSize(width: frame.width * scale, height: frame.height * scale), format: format).pngData { context in
+            context.cgContext.scaleBy(x: scale, y: scale)
+            let paper = PageBackgroundView(frame: CGRect(origin: .zero, size: frame.size))
+            paper.layout = EditorLayout(type: .canvas, pages: [page]); paper.patternVisible = session.manifest.gridVisible ?? true
+            paper.setNeedsDisplay()
+            paper.layer.displayIfNeeded()
+            paper.layer.render(in: context.cgContext)
+            for object in session.objects.filter({ $0.pageId == page.id }).sorted(by: { $0.zIndex < $1.zIndex }) {
+                let rect = AskAIController.rect(object.frame)
+                if object.type == .image, let name = object.assetRefs.first, let assetsURL {
+                    UIImage(contentsOfFile: assetsURL.appendingPathComponent(name).path)?.draw(in: rect)
+                } else {
+                    RichTextRenderer.draw(source: object.source, type: object.type, in: rect, handwritten: object.rendersHandwritten, appearance: object.aiAppearance)
+                }
+            }
+            session.drawing.image(from: frame, scale: scale).draw(in: CGRect(origin: .zero, size: frame.size))
+        }
+    }
     /// Every PencilKit tool (ticket 015). The eraser's own options switch between
     /// object and pixel erasing; the autosave name keeps the last tool across documents.
     private lazy var toolPicker: PKToolPicker = {
@@ -51,6 +95,18 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         return picker
     }()
     /// Tool gesture start and end for Auto Ask (ticket 014). `inked` is true for inking tools.
+    var onPickerPosition: ((Bool, CGFloat) -> Void)?
+    func toolPickerSelectedToolDidChange(_ toolPicker: PKToolPicker) { if handMode { canvas.isDrawingEnabled = false } }
+    func toolPickerFramesObscuredDidChange(_ toolPicker: PKToolPicker) { reportPickerPosition() }
+    private func reportPickerPosition() {
+        guard let window = view.window else { return }
+        let frame = toolPicker.frameObscured(in: window)
+        guard !frame.isNull, !frame.isEmpty else { return }
+        let top = frame.midY < window.bounds.midY
+        let clearance = top ? frame.maxY - window.safeAreaInsets.top : window.bounds.maxY - frame.minY - window.safeAreaInsets.bottom
+        onPickerPosition?(top, max(0, clearance))
+    }
+    var onSelectionChanged: ((CGRect?) -> Void)?
     var onToolBegan: (() -> Void)?
     var onToolEnded: ((_ inked: Bool) -> Void)?
     private var objectViews: [UUID: UIView] = [:]
@@ -127,7 +183,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         handleShape.lineWidth = 2
         selectionOverlay.layer.addSublayer(selectionShape)
         selectionOverlay.layer.addSublayer(handleShape)
-        for layer in [backgroundView, objectContainer, canvas, selectionOverlay] { viewport.addSubview(layer) }
+        for layer in [backgroundView, objectContainer, canvas, selectionOverlay, thinking] { viewport.addSubview(layer) }
 
         lassoPan.maximumNumberOfTouches = 1
         lassoPan.delegate = self
@@ -152,7 +208,9 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
             label.textColor = .secondaryLabel
         }
 
-        let stack = UIStackView(arrangedSubviews: [makeToolbar(), banner, viewport])
+        let toolbar = makeToolbar()
+        editorToolbar = toolbar
+        let stack = UIStackView(arrangedSubviews: [toolbar, banner, viewport])
         stack.axis = .vertical
         stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -178,6 +236,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         super.viewDidAppear(animated)
         guard !session.isReadOnly else { return }
         toolPicker.addObserver(canvas)
+        toolPicker.addObserver(self)
         toolPicker.setVisible(true, forFirstResponder: canvas)
         canvas.becomeFirstResponder()
     }
@@ -185,6 +244,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutViewport()
+        reportPickerPosition()
     }
 
     /// Sizes the layers to the viewport. Runs on every viewport layout, not only the
@@ -226,6 +286,8 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
             button.toolTip = label
             button.isPointerInteractionEnabled = true
             buttons[key] = button
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             row.addArrangedSubview(button)
         }
         add("undo", "arrow.uturn.backward", "Undo") { [weak self] in self?.undoAction() }
@@ -252,11 +314,24 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         let spacer = UIView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         row.addArrangedSubview(spacer)
-        row.addArrangedSubview(saveLabel)
+        // Save state lives in the shell top bar.
         row.isLayoutMarginsRelativeArrangement = true
         row.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
         row.heightAnchor.constraint(equalToConstant: 44).isActive = true
-        return row
+        let scroll = UIScrollView()
+        scroll.showsHorizontalScrollIndicator = false
+        row.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            row.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            row.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            row.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+            row.widthAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        return scroll
     }
 
     private func backgroundMenu() -> UIMenu {
@@ -281,6 +356,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         let scaled = CGSize(width: content.width * canvas.zoomScale, height: content.height * canvas.zoomScale)
         if canvas.contentSize != scaled { canvas.contentSize = scaled }
         backgroundView.layout = session.layout
+        backgroundView.patternVisible = session.manifest.gridVisible ?? true
         updateInsets()
     }
 
@@ -300,6 +376,10 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         objectContainer.transform = CGAffineTransform(scaleX: canvas.zoomScale, y: canvas.zoomScale)
         objectContainer.layer.position = CGPoint(x: -canvas.contentOffset.x, y: -canvas.contentOffset.y)
         CATransaction.commit()
+        if let region = thinkingRegion {
+            let point = EditorGeometry.viewport(CGPoint(x: region.maxX, y: region.minY), zoom: canvas.zoomScale, offset: canvas.contentOffset)
+            thinking.frame = CGRect(x: min(max(8, point.x), max(8, viewport.bounds.width - 40)), y: min(max(8, point.y), max(8, viewport.bounds.height - 40)), width: 32, height: 32)
+        }
         backgroundView.zoom = canvas.zoomScale
         backgroundView.offset = canvas.contentOffset
         redrawSelection()
@@ -337,6 +417,10 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
     /// the visible area. Ticket 014 tries the newest ink before the visible area.
     var askAIRegion: CGRect {
         if let bounds = askAISelection { return bounds }
+        return visiblePageRegion
+    }
+
+    var visiblePageRegion: CGRect {
         let topLeft = documentPoint(CGPoint(x: viewport.bounds.minX, y: viewport.bounds.minY))
         let bottomRight = documentPoint(CGPoint(x: viewport.bounds.maxX, y: viewport.bounds.maxY))
         return CGRect(x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y)
@@ -409,7 +493,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         selectMode.toggle()
         lassoPan.isEnabled = selectMode
         selectTap.isEnabled = selectMode
-        canvas.drawingGestureRecognizer.isEnabled = !selectMode
+        canvas.drawingGestureRecognizer.isEnabled = !selectMode && !handMode
         canvas.panGestureRecognizer.minimumNumberOfTouches = selectMode ? 2 : 1
         buttons["select"]?.isSelected = selectMode
         buttons["select"]?.accessibilityValue = selectMode ? "On" : "Off"
@@ -507,11 +591,24 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
             if let rich = item as? RichObjectView {
                 rich.configure(source: object.source, type: object.type,
                                density: (view.window?.screen.scale ?? 2) * max(1, canvas.zoomScale),
-                               handwritten: object.rendersHandwritten)
+                               handwritten: object.rendersHandwritten, appearance: object.aiAppearance)
                 // Handwritten answers read as ink on the page, so they have no box.
                 rich.layer.borderWidth = object.rendersHandwritten ? 0 : 0.5
             } else { item.accessibilityLabel = accessibilityLabel(for: object) }
         }
+        let path = UIBezierPath()
+        for object in session.objects where object.isDraft == true { path.append(UIBezierPath(rect: layout.documentFrame(of: object).insetBy(dx: -3, dy: -3))) }
+        for batch in session.draftInk {
+            let strokes = session.drawing.strokes.filter { $0.path.creationDate == batch.strokeDate }
+            let bounds = strokes.reduce(CGRect.null) { $0.union($1.renderBounds) }
+            if !bounds.isNull { path.append(UIBezierPath(rect: bounds.insetBy(dx: -4, dy: -4))) }
+        }
+        draftOutlines.path = path.cgPath
+        draftOutlines.strokeColor = UIColor.systemOrange.cgColor
+        draftOutlines.fillColor = nil
+        draftOutlines.lineWidth = 2 / max(0.25, canvas.zoomScale)
+        draftOutlines.lineDashPattern = [6, 4]
+        objectContainer.layer.addSublayer(draftOutlines)
     }
 
     private func makeObjectView(_ object: DocumentObject) -> UIView {
@@ -665,6 +762,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
     }
 
     private func redrawSelection() {
+        onSelectionChanged?(askAISelection)
         let zoom = canvas.zoomScale, offset = canvas.contentOffset
         handleShape.path = nil
         let points: [CGPoint]

@@ -42,6 +42,9 @@ struct AIRequest: Sendable {
     var instruction: String
     var pngImages: [Data] = []
     var jsonSchema: Data? = nil
+    var reasoning: ReasoningLevel? = nil
+    /// Text only, oldest first; the current image and instruction follow these turns.
+    var history: [AIChatMessage] = []
 }
 
 struct AIUsage: Equatable, Sendable {
@@ -105,4 +108,15 @@ enum AIError: Error, Equatable, Sendable, LocalizedError {
 protocol AIProvider: Sendable {
     func capabilities(model: String) -> ModelCapabilities?
     func send(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, Error>
+}
+
+struct AIChatMessage: Equatable, Sendable {
+    enum Role: String, Sendable { case user, assistant }
+    var role: Role
+    var text: String
+    static func validate(_ history: [Self]) throws {
+        guard history.count <= AgentChatHistory.maxTurns * 2,
+              history.count.isMultiple(of: 2),
+              history.enumerated().allSatisfy({ $0.element.role == ($0.offset.isMultiple(of: 2) ? .user : .assistant) && $0.element.text.utf8.count <= DocumentLimits.maxMessageBytes }) else { throw AIError.invalidRequest }
+    }
 }

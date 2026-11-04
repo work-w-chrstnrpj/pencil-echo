@@ -111,6 +111,30 @@ struct NativeProviderTests {
             #expect(schema["additionalProperties"] == nil)
         }
     }
+
+    @Test(arguments: ids) func twoImagesKeepContextThenFocusOrder(_ id: String) async throws {
+        let (provider, transport, _, original) = try setup(id)
+        let context = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")!
+        let focus = try Data(contentsOf: #require(Bundle.main.url(forResource: "handwritten-equation", withExtension: "png")))
+        var request = original
+        request.pngImages = [context, focus]
+        _ = try await collect(provider, request)
+        let payload = try #require(transport.recorded.first?.httpBody)
+        let body = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        let encoded = [context.base64EncodedString(), focus.base64EncodedString()]
+        if id == "anthropic" {
+            let messages = try #require(body["messages"] as? [[String: Any]])
+            let content = try #require(messages[0]["content"] as? [[String: Any]])
+            let images = content.compactMap { $0["source"] as? [String: String] }.compactMap { $0["data"] }
+            #expect(images == encoded)
+        } else {
+            let contents = try #require(body["contents"] as? [[String: Any]])
+            let parts = try #require(contents[0]["parts"] as? [[String: Any]])
+            let images = parts.compactMap { $0["inlineData"] as? [String: String] }.compactMap { $0["data"] }
+            #expect(images == encoded)
+        }
+    }
+
     @Test(arguments: ids, [401, 403, 404, 429, 500, 503, 529, 504])
     func httpErrorsAreFixedAndNeverRetry(_ id: String, _ status: Int) async throws {
         let (provider, transport, _, request) = try setup(id, status: status)

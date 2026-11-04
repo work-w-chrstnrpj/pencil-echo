@@ -13,9 +13,12 @@ protocol AskAIDocument: AnyObject {
     var layout: EditorLayout { get }
     var snapshot: EditorSnapshot { get }
     var conversation: Conversation { get }
+    var captureAssetsURL: URL? { get }
     /// One undo step for the answer. The conversation change is not undoable.
     func applyAIAnswer(_ next: EditorSnapshot, conversation: Conversation, named name: String)
 }
+
+extension AskAIDocument { var captureAssetsURL: URL? { nil } }
 
 /// A provider that refuses every request: used when the settings have no usable
 /// endpoint, so Ask AI never falls back to a different provider.
@@ -36,6 +39,9 @@ struct AskAICapture: Equatable, Sendable {
     var instruction: String
     var png: Data
     var imageScale: Double
+    /// A magnified copy of `focusFrame`, sent only when that region is small beside the capture.
+    var focusPNG: Data?
+    var focusImageScale: Double?
     var fingerprint: Int
 }
 
@@ -54,7 +60,18 @@ final class AskAIController {
     }
 
     private(set) var phase = Phase.idle
+    private(set) var autoAskSuspended = false
+    func suspendAutoAsk(_ suspended: Bool) { autoAskSuspended = suspended; if suspended { toolBegan() } }
     var instruction = CanvasCommandPrompt.defaultInstruction
+    private(set) var hasPlacedAnswer = false
+    var status: String {
+        switch phase {
+        case .idle: hasPlacedAnswer ? "Placed" : "Ready"
+        case .pending: "Asking…"
+        case .review: "Review answer"
+        case .failed(_, let message): message
+        }
+    }
 
     private let document: AskAIDocument
     private let region: () -> CGRect
@@ -74,7 +91,7 @@ final class AskAIController {
     private var lastInkRegion: CGRect?
 
     nonisolated static let captureMargin = 24.0
-    static let maxImageSide = 2048.0
+    nonisolated static let maxImageSide = 2048.0
     /// How far around the newest ink to look for earlier work it may refer to (ticket 017).
     nonisolated static let contextReach = 200.0
     /// Longest side of the context region, so one large drawing can't shrink the image too much.
@@ -84,7 +101,7 @@ final class AskAIController {
          selection: @escaping () -> CGRect? = { nil },
          autoAsk: @escaping () -> AutoAskSettings = { AutoAskSettings.load() },
          provider: @escaping () -> (any AIProvider, String) = AskAIController.configuredProvider,
-         blocked: @escaping () -> String? = { AISettings.load().askAIBlockedReason },
+         blocked: @escaping () -> String? = AskAIController.configuredBlockedReason,
          schema: Data? = AskAIController.bundledSchema, now: @escaping () -> Date = Date.init) {
         self.document = document
         self.region = region
@@ -99,12 +116,22 @@ final class AskAIController {
 
     /// The provider and model selected in AI Settings (ticket 012).
     nonisolated static func configuredProvider() -> (any AIProvider, String) {
+#if DEBUG
+        if AgentChatFixtureProvider.isEnabled { return (AgentChatFixtureProvider(), "fixture-vision") }
+#endif
         let settings = AISettings.load()
         let model = settings.settings(for: settings.selectedPresetID).model
         guard let preset = try? settings.resolvedPreset(for: settings.selectedPresetID) else {
             return (UnconfiguredProvider(), model)
         }
         return (ProviderFactory.make(preset), model)
+    }
+
+    nonisolated static func configuredBlockedReason() -> String? {
+#if DEBUG
+        if AgentChatFixtureProvider.isEnabled { return nil }
+#endif
+        return AISettings.load().askAIBlockedReason
     }
 
     nonisolated static var bundledSchema: Data? {
@@ -157,7 +184,7 @@ final class AskAIController {
         autoTask?.cancel()
         autoTask = nil
         let settings = autoAsk()
-        guard inked, settings.enabled else { return }
+        guard inked, settings.enabled, !autoAskSuspended else { return }
         autoTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(settings.delaySeconds))
             guard !Task.isCancelled, let self else { return }
@@ -169,7 +196,7 @@ final class AskAIController {
     /// The pause timer fired. Asks only about new ink, never over a selection or a
     /// held answer; a pending request re-arms the timer so the new ink is asked next.
     func autoAskNow() {
-        guard autoAsk().enabled, !document.isReadOnly, blockedReason == nil,
+        guard !autoAskSuspended, autoAsk().enabled, !document.isReadOnly, blockedReason == nil,
               selection() == nil, newestInkRegion != nil else { return }
         switch phase {
         case .review: return
@@ -259,11 +286,29 @@ final class AskAIController {
             pageBounds: CommandFrame(x: 0, y: 0, width: page.size.width, height: page.size.height),
             allowReplace: false)
         let png = RegionCapture.render(drawing: snapshot.drawing, documentRect: clipped,
-                                       objects: scopeObjects, pageOrigin: pageDocument.origin, scale: scale)
+                                       objects: scopeObjects, pageOrigin: pageDocument.origin, scale: scale, assetsURL: document.captureAssetsURL)
+        let magnification = withContext ? Self.focusImageScale(focus: focus, context: clipped, contextScale: scale) : nil
+        var focusPNG: Data?
+        if let magnification {
+            let rendered = RegionCapture.render(drawing: snapshot.drawing, documentRect: focus,
+                                                objects: scopeObjects, pageOrigin: pageDocument.origin, scale: magnification, assetsURL: document.captureAssetsURL)
+            if rendered.count <= 5_000_000 { focusPNG = rendered }
+        }
         let fingerprint = ScopeFingerprint.make(strokes: snapshot.drawing.strokes, objects: snapshot.objects,
                                                 pageId: page.id, scope: focusScope, pageOrigin: pageDocument.origin)
         return AskAICapture(context: context, focusFrame: Self.frame(focusScope), instruction: instruction, png: png,
-                            imageScale: scale, fingerprint: fingerprint)
+                            imageScale: scale, focusPNG: focusPNG, focusImageScale: focusPNG == nil ? nil : magnification,
+                            fingerprint: fingerprint)
+    }
+
+    /// A second image, up to 3×, when the newest input is less than half the capture's longest side.
+    nonisolated static func focusImageScale(focus: CGRect, context: CGRect, contextScale: Double) -> Double? {
+        let focusLong = max(focus.width, focus.height)
+        let contextLong = max(context.width, context.height)
+        guard focusLong >= 8, contextLong > focusLong * 2 else { return nil }
+        let magnified = min(3, maxImageSide / focusLong)
+        guard magnified > contextScale + 0.05 else { return nil }
+        return magnified
     }
 
     /// The focus plus every stroke or object frame that comes within `contextReach`
@@ -301,8 +346,10 @@ final class AskAIController {
                                 systemPrompt: CanvasCommandPrompt.system,
                                 instruction: CanvasCommandPrompt.instruction(capture.instruction, context: capture.context,
                                                                              imageScale: capture.imageScale,
-                                                                             focusFrame: capture.focusFrame),
-                                pngImages: [capture.png], jsonSchema: schema)
+                                                                             focusFrame: capture.focusFrame,
+                                                                             focusImageScale: capture.focusPNG == nil ? nil : capture.focusImageScale),
+                                pngImages: capture.focusPNG.map { [capture.png, $0] } ?? [capture.png], jsonSchema: schema,
+                                reasoning: AISettings.load().settings(for: AISettings.load().selectedPresetID).reasoning)
         task = Task { [weak self] in
             var text: String?
             var failure: AIError?
@@ -339,7 +386,7 @@ final class AskAIController {
         }
     }
 
-    private func validationState(for capture: AskAICapture, ignoringScopeChange: Bool = false) -> DocumentValidationState {
+    func validationState(for capture: AskAICapture, ignoringScopeChange: Bool = false) -> DocumentValidationState {
         let snapshot = document.snapshot, layout = document.layout
         let pageIndex = layout.pageIndex(of: capture.context.pageId)
         let changed: Bool
@@ -372,6 +419,7 @@ final class AskAIController {
         let conversation = document.conversation.recordingAnswer(
             requestId: capture.context.requestId, instruction: capture.instruction, message: message, at: now())
         document.applyAIAnswer(next, conversation: conversation, named: "AI Answer")
+        hasPlacedAnswer = true
         phase = .idle
     }
 
@@ -402,14 +450,48 @@ final class AskAIController {
             case .drawInk(let drawing, let placement, let frame):
                 let frameValue: Any = frame.map { ["x": $0.x, "y": $0.y, "width": $0.width, "height": $0.height] } ?? NSNull()
                 let strokes: [[String: Any]] = drawing.strokes.map { stroke in
-                    ["kind": stroke.kind.rawValue, "points": stroke.points.map { [$0.x, $0.y] },
-                     "closed": stroke.closed, "color": stroke.color.rawValue, "size": stroke.size]
+                    var object: [String: Any] = [
+                        "kind": stroke.kind.rawValue, "points": stroke.points.map { [$0.x, $0.y] },
+                        "closed": stroke.closed, "color": stroke.color.rawValue, "size": stroke.size,
+                    ]
+                    if stroke.arrow != .none { object["arrow"] = stroke.arrow.rawValue }
+                    if stroke.fill { object["fill"] = true }
+                    if let amplitude = stroke.amplitude { object["amplitude"] = amplitude }
+                    if let wavelength = stroke.wavelength { object["wavelength"] = wavelength }
+                    if let center = stroke.center { object["center"] = [center.x, center.y] }
+                    if let radiusX = stroke.radiusX { object["radiusX"] = radiusX }
+                    if let radiusY = stroke.radiusY { object["radiusY"] = radiusY }
+                    if let start = stroke.startAngle { object["startAngle"] = start }
+                    if let sweep = stroke.sweep { object["sweep"] = sweep }
+                    return object
                 }
-                return ["op": "draw_ink", "width": drawing.width, "height": drawing.height, "strokes": strokes,
-                        "placement": placement.rawValue, "frame": frameValue]
+                var operation: [String: Any] = [
+                    "op": "draw_ink",
+                    "width": drawing.coordinates == .page ? NSNull() : drawing.width,
+                    "height": drawing.coordinates == .page ? NSNull() : drawing.height,
+                    "strokes": strokes, "placement": placement.rawValue, "frame": frameValue,
+                ]
+                if drawing.coordinates == .page { operation["coordinates"] = "page" }
+                if !drawing.labels.isEmpty {
+                    operation["labels"] = drawing.labels.map {
+                        ["kind": $0.kind.rawValue, "text": $0.text, "x": $0.at.x, "y": $0.at.y]
+                    }
+                }
+                return operation
             }
         }
-        return (try? JSONSerialization.data(withJSONObject: ["version": 2, "operations": items, "message": NSNull()])) ?? Data()
+        let diagram = operations.contains { operation in
+            guard case .drawInk(let drawing, _, _) = operation else { return false }
+            if drawing.coordinates != .local || !drawing.labels.isEmpty { return true }
+            return drawing.strokes.contains { stroke in
+                switch stroke.kind {
+                case .line, .polyline, .smooth, .ellipse: stroke.arrow != .none || stroke.fill
+                default: true
+                }
+            }
+        }
+        let version = diagram ? 3 : 2
+        return (try? JSONSerialization.data(withJSONObject: ["version": version, "operations": items, "message": NSNull()])) ?? Data()
     }
 }
 
@@ -431,15 +513,48 @@ enum AnswerApplier {
             return DocumentObject(id: UUID(), pageId: next.pages[page].id, type: ObjectType(rawValue: type.rawValue)!,
                                   frame: PageRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height),
                                   zIndex: zIndex, source: source, assetRefs: [],
-                                  createdBy: .ai(requestId: capture.context.requestId), createdAt: date, updatedAt: date)
+                                  createdBy: .ai(requestId: capture.context.requestId), createdAt: date, updatedAt: date,
+                                  aiAppearance: CanvasAISettings.load().appearance)
         }
 
         enum Flowing { case object(CanvasObjectType, String), ink(InkDrawing) }
         var flowing: [Flowing] = []
         var preferBelow = false
         func addInk(_ drawing: InkDrawing, in frame: CGRect, page: Int) {
-            let origin = EditorLayout(type: layout.type, pages: next.pages).pageRect(page).origin
-            next.drawing.strokes.append(contentsOf: InkAnswer.strokes(drawing, in: frame.offsetBy(dx: origin.x, dy: origin.y)))
+            let pageOrigin = EditorLayout(type: layout.type, pages: next.pages).pageRect(page).origin
+            var drawing = drawing
+            let color = CanvasAISettings.load().appearance.ink.rawValue
+            for index in drawing.strokes.indices {
+                drawing.strokes[index].color = InkStrokeSpec.Color(rawValue: color) ?? .blue
+            }
+            if drawing.coordinates == .page {
+                next.drawing.strokes.append(contentsOf: InkAnswer.pageStrokes(drawing, pageOrigin: pageOrigin))
+                for label in drawing.labels {
+                    let placed = labelFrame(label, at: CGPoint(x: label.at.x, y: label.at.y), page: page)
+                    next.objects.append(makeObject(label.kind == .latex ? .latex : .text, label.text, placed, page: page))
+                }
+            } else {
+                let documentFrame = frame.offsetBy(dx: pageOrigin.x, dy: pageOrigin.y)
+                next.drawing.strokes.append(contentsOf: InkAnswer.strokes(drawing, in: documentFrame))
+                let fitted = InkAnswer.fit(drawing, in: documentFrame)
+                for label in drawing.labels {
+                    let point = CGPoint(x: fitted.origin.x + label.at.x * fitted.scale - pageOrigin.x,
+                                        y: fitted.origin.y + label.at.y * fitted.scale - pageOrigin.y)
+                    next.objects.append(makeObject(label.kind == .latex ? .latex : .text, label.text,
+                                                   labelFrame(label, at: point, page: page), page: page))
+                }
+            }
+        }
+        func labelFrame(_ label: InkLabel, at point: CGPoint, page: Int) -> CGRect {
+            let type = label.kind == .latex ? ObjectType.latex : ObjectType.text
+            let pageSize = next.pages[page].size
+            var width = RichTextRenderer.fittingWidth(source: label.text, type: type, maxWidth: 160, handwritten: label.kind == .text)
+            width = min(max(width, 16), pageSize.width)
+            var height = RichTextRenderer.height(source: label.text, type: type, width: width, handwritten: label.kind == .text)
+            if height < 8 { height = 8 }
+            let x = min(max(0, point.x), max(0, pageSize.width - width))
+            let y = min(max(0, point.y - height / 2), max(0, pageSize.height - height))
+            return CGRect(x: x, y: y, width: width, height: height)
         }
         for operation in operations {
             switch operation {
@@ -457,8 +572,11 @@ enum AnswerApplier {
                     flowing.append(.object(type, source))
                 }
             case .drawInk(let drawing, let placement, let frame):
-                // Ink may overlap existing ink at an exact frame, for annotations such as a circle around a term.
-                if placement == .atFrame, let frame {
+                // Page points are already where they belong. An exact frame may overlap
+                // existing ink, for annotations such as a circle around a term.
+                if drawing.coordinates == .page {
+                    addInk(drawing, in: .zero, page: pageIndex)
+                } else if placement == .atFrame, let frame {
                     addInk(drawing, in: AskAIController.rect(frame), page: pageIndex)
                 } else {
                     if flowing.isEmpty { preferBelow = placement == .belowScope }
@@ -585,70 +703,56 @@ enum InkAnswer {
         return CGSize(width: drawing.width * scale, height: drawing.height * scale)
     }
 
-    /// Strokes in document space, fitted into `rect` with the drawing's aspect ratio kept.
-    static func strokes(_ drawing: InkDrawing, in rect: CGRect) -> [PKStroke] {
+    /// How a local drawing sits inside `rect`: uniform scale, aspect kept, centered.
+    static func fit(_ drawing: InkDrawing, in rect: CGRect) -> (scale: CGFloat, origin: CGPoint) {
         let scale = min(rect.width / drawing.width, rect.height / drawing.height)
         let origin = CGPoint(x: rect.midX - drawing.width * scale / 2, y: rect.midY - drawing.height * scale / 2)
-        return drawing.strokes.compactMap { spec in
-            let local = path(spec)
-            guard local.count >= 2 else { return nil }
-            let controls = local.enumerated().map { index, point in
-                PKStrokePoint(location: CGPoint(x: origin.x + point.x * scale, y: origin.y + point.y * scale),
-                              timeOffset: Double(index) / 120, size: CGSize(width: spec.size, height: spec.size),
-                              opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+        return (scale, origin)
+    }
+
+    /// Strokes in document space, fitted into `rect` with the drawing's aspect ratio kept.
+    static func strokes(_ drawing: InkDrawing, in rect: CGRect) -> [PKStroke] {
+        let fitted = fit(drawing, in: rect)
+        return render(drawing, scale: fitted.scale, origin: fitted.origin)
+    }
+
+    /// Page-coordinate ink is already in page points. `pageOrigin` moves it into document space.
+    static func pageStrokes(_ drawing: InkDrawing, pageOrigin: CGPoint) -> [PKStroke] {
+        render(drawing, scale: 1, origin: pageOrigin)
+    }
+
+    /// Sample points of the centerline. Straight segments are densified so PencilKit's
+    /// spline stays close to the corners; `smooth` is a Catmull-Rom curve through the points.
+    static func path(_ spec: InkStrokeSpec) -> [CGPoint] {
+        (InkGeometry.outline(spec) ?? []).map { CGPoint(x: $0.x, y: $0.y) }
+    }
+
+    private static func render(_ drawing: InkDrawing, scale: CGFloat, origin: CGPoint) -> [PKStroke] {
+        drawing.strokes.flatMap { spec in
+            polylines(spec).map { points in
+                let controls = points.enumerated().map { index, point in
+                    PKStrokePoint(location: CGPoint(x: origin.x + point.x * scale, y: origin.y + point.y * scale),
+                                  timeOffset: Double(index) / 120, size: CGSize(width: spec.size, height: spec.size),
+                                  opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+                }
+                return PKStroke(ink: PKInk(.pen, color: color(spec.color)),
+                                path: PKStrokePath(controlPoints: controls, creationDate: creationDate))
             }
-            return PKStroke(ink: PKInk(.pen, color: color(spec.color)),
-                            path: PKStrokePath(controlPoints: controls, creationDate: creationDate))
         }
     }
 
-    /// Sample points in the local box. Straight segments are densified so PencilKit's
-    /// spline stays close to the corners; `smooth` is a Catmull-Rom curve through the points.
-    static func path(_ spec: InkStrokeSpec) -> [CGPoint] {
-        var points = spec.points.map { CGPoint(x: $0.x, y: $0.y) }
-        switch spec.kind {
-        case .ellipse:
-            let box = CGRect(x: min(points[0].x, points[1].x), y: min(points[0].y, points[1].y),
-                             width: abs(points[1].x - points[0].x), height: abs(points[1].y - points[0].y))
-            return (0...64).map { index in
-                let angle = Double(index) / 64 * 2 * .pi
-                return CGPoint(x: box.midX + box.width / 2 * cos(angle), y: box.midY + box.height / 2 * sin(angle))
-            }
-        case .line, .polyline:
-            if spec.closed, let first = points.first { points.append(first) }
-            var result: [CGPoint] = [points[0]]
-            for (start, end) in zip(points, points.dropFirst()) {
-                let steps = max(1, Int((hypot(end.x - start.x, end.y - start.y) / 6).rounded(.up)))
-                for step in 1...steps {
-                    let t = CGFloat(step) / CGFloat(steps)
-                    result.append(CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t))
-                }
-            }
-            return result
-        case .smooth:
-            if spec.closed, points.count > 2 { points.append(points[0]) }
-            guard points.count > 2 else { return points }
-            func at(_ index: Int) -> CGPoint {
-                if spec.closed, points.count > 3 {
-                    let count = points.count - 1
-                    return points[((index % count) + count) % count]
-                }
-                return points[min(max(index, 0), points.count - 1)]
-            }
-            var result: [CGPoint] = []
-            for index in 0..<(points.count - 1) {
-                let p0 = at(index - 1), p1 = at(index), p2 = at(index + 1), p3 = at(index + 2)
-                for step in 0..<8 {
-                    let t = CGFloat(step) / 8, t2 = t * t, t3 = t2 * t
-                    func blend(_ a: CGFloat, _ b: CGFloat, _ c: CGFloat, _ d: CGFloat) -> CGFloat {
-                        0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3)
-                    }
-                    result.append(CGPoint(x: blend(p0.x, p1.x, p2.x, p3.x), y: blend(p0.y, p1.y, p2.y, p3.y)))
-                }
-            }
-            result.append(points[points.count - 1])
-            return result
+    /// Centerline, then arrowheads, then fill chords. Each entry is one PencilKit stroke.
+    static func polylines(_ spec: InkStrokeSpec) -> [[CGPoint]] {
+        var lines: [[CGPoint]] = []
+        let centerline = path(spec)
+        if centerline.count >= 2 { lines.append(centerline) }
+        let marks = InkGeometry.decorations(spec)
+        for stroke in marks.arrows + marks.fill {
+            let points = stroke.map { CGPoint(x: $0.x, y: $0.y) }
+            guard points.count >= 2 else { continue }
+            lines.append(points)
         }
+        return lines
     }
 }
 
@@ -656,7 +760,7 @@ enum InkAnswer {
 @MainActor
 enum RegionCapture {
     static func render(drawing: PKDrawing, documentRect: CGRect, objects: [DocumentObject],
-                       pageOrigin: CGPoint, scale: Double) -> Data {
+                       pageOrigin: CGPoint, scale: Double, assetsURL: URL? = nil) -> Data {
         let size = CGSize(width: (documentRect.width * scale).rounded(.up), height: (documentRect.height * scale).rounded(.up))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -666,10 +770,16 @@ enum RegionCapture {
             context.fill(CGRect(origin: .zero, size: size))
             context.cgContext.scaleBy(x: scale, y: scale)
             context.cgContext.translateBy(x: -documentRect.minX, y: -documentRect.minY)
-            for object in objects.sorted(by: { $0.zIndex < $1.zIndex }) where object.type != .image {
+            for object in objects.sorted(by: { $0.zIndex < $1.zIndex }) {
                 let rect = AskAIController.rect(object.frame).offsetBy(dx: pageOrigin.x, dy: pageOrigin.y)
-                RichTextRenderer.draw(source: object.source, type: object.type, in: rect, density: scale,
-                                      handwritten: object.rendersHandwritten)
+                if object.type == .image {
+                    if let name = object.assetRefs.first, AssetName.isValid(name), let assetsURL {
+                        UIImage(contentsOfFile: assetsURL.appendingPathComponent(name).path)?.draw(in: rect)
+                    }
+                } else {
+                    RichTextRenderer.draw(source: object.source, type: object.type, in: rect, density: scale,
+                                          handwritten: object.rendersHandwritten, appearance: object.aiAppearance)
+                }
             }
             // Dark ink regardless of appearance, so dark-mode white ink stays visible on white.
             var image = UIImage()

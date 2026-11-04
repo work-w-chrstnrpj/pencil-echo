@@ -307,3 +307,43 @@ struct ProviderSettingsTests {
         }
     }
 }
+
+struct EditorToolbarProviderTests {
+    @Test func legacyProviderSettingsStillDecode() throws {
+        let data = Data(#"{"model":"old","visionOverrides":{}}"#.utf8)
+        let settings = try JSONDecoder().decode(ProviderSettings.self, from: data)
+        #expect(settings.reasoning == nil)
+        #expect(!ReasoningLevel.supports(preset: "custom", model: "gpt-5.1"))
+        #expect(!ReasoningLevel.supports(preset: "anthropic", model: "claude-sonnet-5-5"))
+        #expect(!ReasoningLevel.supports(preset: "gemini", model: "gemini-3.8-flash"))
+    }
+
+    @Test(arguments: ReasoningLevel.allCases) func adapterReasoningMappings(_ effort: ReasoningLevel) throws {
+        for (id, model) in [("openai", "gpt-5.1"), ("anthropic", "claude-sonnet-4-6"), ("gemini", "gemini-2.5-flash")] {
+            var settings = AISettings()
+            settings.providers[id] = ProviderSettings(model: model, visionOverrides: [model: true], reasoning: effort)
+            let preset = try settings.resolvedPreset(for: id)
+            let keys = MemoryCredentials()
+            keys.save("synthetic", for: try ProviderIdentity(presetID: id, baseURL: preset.baseURL))
+            let request = AIRequest(model: model, systemPrompt: "JSON", instruction: "Solve", reasoning: effort)
+            let http: URLRequest
+            switch id {
+            case "anthropic": http = try AnthropicProvider(preset: preset, credentials: keys).makeRequest(request)
+            case "gemini": http = try GeminiProvider(preset: preset, credentials: keys).makeRequest(request)
+            default: http = try OpenAICompatibleProvider(preset: preset, credentials: keys).makeRequest(request)
+            }
+            let payload = try #require(http.httpBody)
+            let body = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
+            if id == "openai" { #expect(body["reasoning_effort"] as? String == (effort == .off ? "none" : effort.rawValue)) }
+            if id == "anthropic" {
+                let thinking = try #require(body["thinking"] as? [String: Any])
+                #expect(thinking["type"] as? String == (effort == .off ? "disabled" : "enabled"))
+                #expect((body["max_tokens"] as? Int) == effort.budget + 4096)
+            }
+            if id == "gemini" {
+                let config = try #require(body["generationConfig"] as? [String: Any])
+                #expect((config["thinkingConfig"] as? [String: Int])?["thinkingBudget"] == effort.budget)
+            }
+        }
+    }
+}

@@ -56,27 +56,32 @@ struct DocumentEditorScreen: View {
     @State private var ownsEditing = false
     @State private var showsUnsavedAlert = false
     @State private var title = ""
+    @State private var activeId: UUID?
+    @State private var isCreating = false
+    @State private var creationFailed = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var effectiveSizeClass: UserInterfaceSizeClass? {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-editorCompactWidth"), ProcessInfo.processInfo.arguments.contains("-libraryTestRoot") { return .compact }
+#endif
+        return sizeClass
+    }
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Done") { Task { await close() } }
-                    }
-                }
         }
         .task { await load() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { saveInBackground() }
         }
         .onDisappear {
-            if ownsEditing { OpenDocuments.shared.release(documentId) }
+            if ownsEditing { OpenDocuments.shared.release(activeId ?? documentId) }
             ownsEditing = false
         }
+        .alert("Couldn’t create document", isPresented: $creationFailed) { Button("OK", role: .cancel) {} }
         .alert("Changes not saved", isPresented: $showsUnsavedAlert) {
             Button("Keep Editing", role: .cancel) {}
             Button("Close Without Saving", role: .destructive) { onClose() }
@@ -91,7 +96,9 @@ struct DocumentEditorScreen: View {
         case .loading:
             ProgressView("Opening…")
         case .ready(let session, let assetsURL):
-            AskAIEditorContainer(session: session, assetsURL: assetsURL)
+            AskAIEditorContainer(session: session, assetsURL: assetsURL, onClose: { Task { await close() } }, onCreate: { type in Task { await create(type) } })
+                .environment(\.horizontalSizeClass, effectiveSizeClass)
+                .id(session.manifest.id)
                 .ignoresSafeArea(.container, edges: .bottom)
         case .failed(let message):
             ContentUnavailableView("Can't open this document", systemImage: "exclamationmark.triangle", description: Text(message))
@@ -100,6 +107,7 @@ struct DocumentEditorScreen: View {
 
     private func load() async {
         guard case .loading = phase else { return }
+        let documentId = activeId ?? documentId
         ownsEditing = OpenDocuments.shared.claim(documentId)
         do {
             let loaded = try await store.load(id: documentId)
@@ -117,12 +125,27 @@ struct DocumentEditorScreen: View {
         }
     }
 
+    private func create(_ type: DocumentType) async {
+        guard !isCreating else { return }
+        isCreating = true
+        defer { isCreating = false }
+        guard case .ready(let session, _) = phase, await session.saveNow() else { showsUnsavedAlert = true; return }
+        do {
+            let new = try await store.create(type: type)
+            releaseEditingClaim()
+            activeId = new.id
+            phase = .loading
+            await load()
+        } catch { creationFailed = true }
+    }
+
     private func releaseEditingClaim() {
-        if ownsEditing { OpenDocuments.shared.release(documentId) }
+        if ownsEditing { OpenDocuments.shared.release(activeId ?? documentId) }
         ownsEditing = false
     }
 
     private func close() async {
+        guard !isCreating else { return }
         if case .ready(let session, _) = phase, !(await session.saveNow()) {
             showsUnsavedAlert = true
             return

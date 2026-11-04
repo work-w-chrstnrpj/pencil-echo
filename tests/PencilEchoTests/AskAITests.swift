@@ -582,6 +582,82 @@ struct VisualAnswerTests {
         #expect(smooth.first == CGPoint(x: 0, y: 0) && smooth.last == CGPoint(x: 100, y: 0))
         #expect(smooth.contains { abs($0.x - 50) < 0.01 && abs($0.y - 40) < 0.01 })
     }
+
+    @Test func arcWaveArrowAndFill() {
+        let arc = InkStrokeSpec(kind: .arc, points: [], closed: false, color: .black, size: 3,
+                                center: CommandPoint(x: 50, y: 50), radiusX: 20, radiusY: 10, startAngle: 0, sweep: 90)
+        let arcPath = InkAnswer.path(arc)
+        #expect(abs(arcPath[0].x - 70) < 0.01 && abs(arcPath[0].y - 50) < 0.01)
+        #expect(abs(arcPath[arcPath.count - 1].x - 50) < 0.01 && abs(arcPath[arcPath.count - 1].y - 60) < 0.01)
+
+        let wave = InkStrokeSpec(kind: .wave, points: [CommandPoint(x: 0, y: 50), CommandPoint(x: 100, y: 50)],
+                                 closed: false, color: .black, size: 3, amplitude: 10, wavelength: 50)
+        let wavePath = InkGeometry.outline(wave) ?? []
+        let peaks = wavePath.filter { abs($0.y - 60) < 0.2 }
+        #expect(peaks.count >= 2 && abs(peaks[1].x - peaks[0].x - 50) < 1)
+
+        let line = InkStrokeSpec(kind: .line, points: [CommandPoint(x: 0, y: 0), CommandPoint(x: 100, y: 0)],
+                                 closed: false, color: .black, size: 4)
+        func tip(_ arrow: InkStrokeSpec.Arrow) -> (Double, Double) {
+            var stroked = line
+            stroked.arrow = arrow
+            let heads = InkGeometry.arrowheads(stroked)
+            let tip = heads[0][0]
+            let barb = heads[0][1]
+            return (tip.x, barb.x)
+        }
+        let end = tip(.end)
+        #expect(abs(end.0 - 100) < 0.5 && end.1 < end.0)
+        let start = tip(.start)
+        #expect(abs(start.0) < 0.5 && start.1 > start.0)
+        let mid = tip(.mid)
+        #expect(abs(mid.0 - 50) < 0.5 && mid.1 < mid.0)
+
+        var square = InkStrokeSpec(kind: .rect, points: [CommandPoint(x: 0, y: 0), CommandPoint(x: 40, y: 40)],
+                                   closed: true, color: .black, size: 4)
+        square.fill = true
+        let chords = InkGeometry.fillChords(square)
+        #expect(chords.contains { chord in
+            abs(chord[0].y - 20) < 4 && chord[0].x <= 20 && chord[1].x >= 20
+        })
+    }
+
+    @Test func feynmanFixturePlacesTheDrawingAndItsLabels() async throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("fixtures/providers/feynman-diagram.json")
+        let raw = try Data(contentsOf: url)
+        let document = base.canvasDocument()
+        let ask = base.controller(document, FakeProvider(result: .success(String(decoding: raw, as: UTF8.self))))
+        ask.ask()
+        try await base.settle(ask)
+        #expect(document.applyCount == 1)
+        let added = Array(document.snapshot.drawing.strokes.dropFirst())
+        #expect(added.count > 5)
+        let labels = document.snapshot.objects
+        #expect(labels.count == 5 && labels.allSatisfy { if case .ai = $0.createdBy { true } else { false } })
+        #expect(labels.contains { $0.type == .latex && $0.source == #"\gamma"# })
+        let ink = added.dropFirst().reduce(added[0].renderBounds) { $0.union($1.renderBounds) }
+        #expect(labels.allSatisfy { ink.intersects(AskAIController.rect($0.frame).insetBy(dx: -40, dy: -40)) })
+    }
+
+    @Test func mazeFixtureLandsOnPagePoints() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("fixtures/providers/maze-path.json")
+        let raw = try Data(contentsOf: url)
+        let context = CommandRequestContext(requestId: UUID(), documentId: UUID(), pageId: base.canvasPage.id,
+                                            capturedRevision: 1, scopeFrame: CommandFrame(x: 76, y: 76, width: 248, height: 88),
+                                            scopeObjectIds: [], pageBounds: CommandFrame(x: 0, y: 0, width: 2_000, height: 2_000),
+                                            allowReplace: false)
+        let state = DocumentValidationState(currentRevision: 1, scopeChanged: false, existingObjectIds: [], appliedRequestIds: [])
+        guard case .valid(let operations) = CommandValidator.validate(raw, context: context, state: state),
+              case .drawInk(let drawing, _, _) = operations[0] else { Issue.record("expected page ink"); return }
+        let strokes = InkAnswer.pageStrokes(drawing, pageOrigin: .zero)
+        let bounds = try #require(strokes.first).renderBounds
+        #expect(abs(bounds.minX - 100) < 8 && abs(bounds.maxX - 180) < 8)
+        #expect(abs(bounds.maxY - 160) < 8)
+    }
 }
 
 // Ticket 017: the newest ink is the focus; the image also shows the earlier work around it.
@@ -656,6 +732,28 @@ struct ContextCaptureTests {
 
     // MARK: Requests
 
+    @Test func focusImageIsAddedOnlyForASmallAttentionRegion() throws {
+        let (_, ask) = mazeThenNote()
+        ask.ask()
+        let capture = try #require(pending(ask))
+        let focus = AskAIController.rect(capture.focusFrame)
+        let scale = try #require(capture.focusImageScale)
+        let focusPNG = try #require(capture.focusPNG)
+        let png = try #require(UIImage(data: focusPNG))
+        #expect(scale > capture.imageScale && scale <= 3)
+        #expect(abs(png.size.width - focus.width * scale) <= 1)
+        let text = CanvasCommandPrompt.instruction(capture.instruction, context: capture.context,
+                                                   imageScale: capture.imageScale, focusFrame: capture.focusFrame,
+                                                   focusImageScale: scale)
+        #expect(text.contains(#""focusImageScale":\#(scale)"#) || text.contains("focusImageScale"))
+        ask.cancel()
+
+        let wide = CGRect(x: 100, y: 100, width: 800, height: 500)
+        #expect(AskAIController.focusImageScale(focus: wide, context: wide, contextScale: 1) == nil)
+        let plain = try #require(ask.makeCapture(documentRegion: wide, withContext: false))
+        #expect(plain.focusPNG == nil && plain.focusImageScale == nil)
+    }
+
     @Test func noteAfterAnsweredDrawingShowsTheDrawing() throws {
         let (_, ask) = mazeThenNote()
         let expectedFocus = note.renderBounds.insetBy(dx: -AskAIController.captureMargin, dy: -AskAIController.captureMargin)
@@ -714,6 +812,7 @@ struct ContextCaptureTests {
         let system = CanvasCommandPrompt.system
         #expect(system.contains("focusFrame") && system.contains("captureFrame"))
         #expect(system.contains("final arrowhead") && system.contains("never copy the label"))
+        #expect(system.contains("coordinates") && system.contains("focusImageScale") && system.contains("wavelength"))
         let context = CommandRequestContext(requestId: UUID(), documentId: UUID(), pageId: UUID(), capturedRevision: 1,
                                             scopeFrame: CommandFrame(x: 0, y: 0, width: 100, height: 80), scopeObjectIds: [],
                                             pageBounds: CommandFrame(x: 0, y: 0, width: 595, height: 842), allowReplace: false)

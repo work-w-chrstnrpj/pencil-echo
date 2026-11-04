@@ -6,6 +6,7 @@ import UIKit
 @MainActor
 final class PageBackgroundView: UIView {
     var layout: EditorLayout? { didSet { setNeedsDisplay() } }
+    var patternVisible = true { didSet { setNeedsDisplay() } }
     var zoom: CGFloat = 1 { didSet { setNeedsDisplay() } }
     var offset: CGPoint = .zero { didSet { setNeedsDisplay() } }
 
@@ -49,7 +50,7 @@ final class PageBackgroundView: UIView {
     }
 
     private func drawPattern(_ background: PageBackground, page: CGRect, visible: CGRect, in context: CGContext) {
-        guard background.style != .blank, !visible.isNull else { return }
+        guard patternVisible, background.style != .blank, !visible.isNull else { return }
         let spacing = CGFloat(background.spacing ?? PageBackground.defaultSpacing)
         guard spacing * zoom >= Self.minimumScreenSpacing else { return }
         // Lines and dots sit at page origin + k × spacing; only visible ones are drawn.

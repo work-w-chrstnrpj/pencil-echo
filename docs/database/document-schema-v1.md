@@ -24,6 +24,7 @@ Design reference: PenEcho `inspiration/src/client/app/canvas-documents.js` and `
   ink/<pageId>.drawing   optional  one per page that has ink
   assets/<sha256>.<ext>  optional  content-addressed binaries
   conversation.json      optional  AI requests and messages (ticket 010)
+  chat.json              optional  recent typed chat and draft-ink ownership (021)
   thumbnail.png          optional  library preview (ticket 009)
 ```
 
@@ -63,6 +64,10 @@ Design reference: PenEcho `inspiration/src/client/app/canvas-documents.js` and `
 | `revision` | Integer ≥ 0; see Revision. |
 | `createdAt`, `updatedAt` | `updatedAt` changes on every save that changes content or the title. |
 | `appVersion` | Diagnostic only: the build that last saved. Never used for logic. |
+| `isFavorite` | Optional Boolean (ticket 022). Absent means not favorited. Library metadata, not content: it never changes `revision` or `updatedAt`. |
+| `lastOpenedAt` | Optional ISO 8601 date (ticket 022). Absent means never opened by this library. Default sort key for Recent; never changes `revision` or `updatedAt`. |
+
+Optional keys are additive within v1: a package written before ticket 022 decodes with both values absent and appears under All Documents.
 
 ### Revision
 
@@ -211,7 +216,7 @@ The editor shows issues in a non-blocking banner.
 
 ## List
 
-`DocumentStore.list() async -> [DocumentSummary]` reads only `manifest.json` (and `thumbnail.png` when shown) from each `*.pencilecho` directory. A package whose manifest fails to load, or whose manifest ID differs from its folder UUID, is listed with its folder name and a `damaged` state, never skipped silently. Required pages/objects corruption is checked on opening. Items sort by updatedAt descending, with filename ordering for equal dates or damaged entries. Library refresh rebuilds the list without a database.
+`DocumentStore.list() async -> [DocumentSummary]` reads only `manifest.json` (and `thumbnail.png` when shown) from each `*.pencilecho` directory. A package whose manifest fails to load, or whose manifest ID differs from its folder UUID, is listed with its folder name and a `damaged` state, never skipped silently. Required pages/objects corruption is checked on opening. Each summary carries `createdAt`, `updatedAt`, `lastOpenedAt` and `isFavorite` for the library's sections, search and sort; damaged packages report no dates and are not favorited. Items sort by updatedAt descending, with filename ordering for equal dates or damaged entries. Library refresh rebuilds the list without a database.
 
 ## Create and delete
 
@@ -252,6 +257,30 @@ Each fixture folder holds one `<id>.pencilecho` package, so the package name mat
 
 `deletePackage(at:)` permits only direct package children of the store root, including damaged packages without a readable manifest UUID. The library requires explicit permanent-delete confirmation and refuses rename/delete while an editor owns that document's in-process claim. No trash/restore is provided until PE-004. See [library verification](../testing/library-009.md).
 
+## Library metadata (022)
+
+`setFavorite(id:isFavorite:)` and `recordOpened(id:at:)` change only the optional `isFavorite` and `lastOpenedAt` manifest keys. Like rename, each clones the live package into an item-replacement directory, rewrites `manifest.json` and swaps the package atomically, so ink, assets, conversation, thumbnails, unknown files and unreadable optional data are preserved byte-for-byte. `revision` and `updatedAt` do not change: favorites and opens are library metadata, not content or title edits. A failed metadata write leaves the original package intact.
+
+The library refuses a favorite change while another window's editor owns the document claim. Recording an open is best effort and is skipped when the document is already open elsewhere. The library records an open for created and successfully opened documents; Recent is the set with `lastOpenedAt` inside the last 30 days, always sorted newest opened first. Search matches titles only. Sort keys are last modified, last opened, title and created; sort and list/grid layout choices are remembered in UserDefaults, not in the document. No migration step or schema-version bump is required.
+
+See [library navigation verification](../testing/library-022.md).
+
 ## Rich-source rendering (011)
 
 Markdown and LaTeX continue to store their original `source` and schema-v1 `frame`. Native attributed strings and formula raster attachments are derived at runtime and are not stored as image assets. Saving an edited source or resizing its width records the measured height in the same undoable content revision; reopening uses the stored source/frame. Renderer limits and fallback never rewrite source. No schema version change or migration is needed; see [renderer limits and tests](../testing/rich-text-011.md).
+
+## Optional editor preferences (020)
+
+`manifest.gridVisible` is an optional Boolean, defaulting to true when absent. It hides/shows the saved page patterns without changing their style or spacing. Rename and visibility preferences schedule atomic saves without advancing the content revision. The editor tracks unsaved metadata separately from content, including changes made during a save.
+
+`objects[].aiAppearance` optionally stores `{ "ink": "blue", "font": "handwritten" }`. Ink values: blue, black, gray, red, green, orange, purple, brown. Font values: handwritten, rounded, system. Absence retains existing handwritten blue AI answers. New AI objects snapshot the current preference; provider reasoning and API keys remain outside packages. These additive optional keys stay schema v1; older packages require no migration.
+
+## Optional chat and drafts (021)
+
+`manifest.chatPanelOpen` is an optional Boolean, absent/false means closed. Like grid visibility, it is view metadata and does not advance the content revision. Settings and chat share one trailing panel.
+
+`chat.json` is an additive optional schema-v1 file. It contains `messages` (up to 10 complete user/assistant pairs, oldest first; existing ConversationMessage fields), and `draftInk` (`requestId`, `strokeDate`). Each message is bounded to 16 KB UTF-8, the file to 512 KB before decoding. Images, API keys, raw request JSON and model thinking are never stored. Missing files become empty history; invalid/oversize files report an optional-file issue and preserve the rest of the document. No 1→2 migration is needed. Older builds ignore the optional file and will drop it on their next save, as the v1 unknown-file policy states.
+
+`objects[].isDraft` is an optional Boolean; absent/false means normal content. Draft objects remain ordinary editable source objects. Draft strokes remain PencilKit strokes, tracked by unique negative, whole-second path creation dates that survive serialization and transforms. Markers are older than every existing stroke (including accepted AI ink), avoiding collision and Auto Ask recapture. Partial erasing retains the marker on fragments. Dashed outlines are derived UI and never exported as ink.
+
+Accept all clears object flags and draft-ink ownership while preserving content. Discard all removes flagged objects and strokes owned by current batches. Each uses one snapshot undo action; undo/redo restores both content and ownership. Creating drafts is one separate undo action. History and duplicate-request IDs persist independently of undo. New chat clears only chat text, preserving drafts, accepted work and duplicate suppression. Chat-only/history changes are tracked as unsaved metadata even when no object change occurs.

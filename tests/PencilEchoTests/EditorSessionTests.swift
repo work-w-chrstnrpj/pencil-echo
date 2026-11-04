@@ -274,3 +274,51 @@ struct EditorSessionTests {
         #expect(registry.claim(id))
     }
 }
+
+extension EditorSessionTests {
+    @Test func editorRenameGridAndAppearanceRoundTrip() async throws {
+        let created = try await store.create(type: .canvas)
+        let session = try await open(created.id)
+        #expect(session.manifest.gridVisible == nil)
+        #expect(!session.rename(to: "  "))
+        #expect(!session.rename(to: String(repeating: "x", count: 201)))
+        #expect(session.rename(to: "  Editor title  "))
+        session.setGridVisible(false)
+        let id = try #require(session.addTextObject(at: CGPoint(x: 100, y: 100)))
+        var next = session.snapshot
+        next.objects[0].aiAppearance = AIAnswerAppearance(ink: .purple, font: .rounded)
+        session.commit(next, named: "Style")
+        #expect(await session.saveNow())
+        let reopened = try await open(created.id)
+        #expect(reopened.manifest.title == "Editor title")
+        #expect(reopened.manifest.gridVisible == false)
+        #expect(reopened.objects.first { $0.id == id }?.aiAppearance == AIAnswerAppearance(ink: .purple, font: .rounded))
+        #expect(reopened.saveState == .saved)
+    }
+
+    @Test func handModeKeepsNavigationAndDisablesDrawing() async throws {
+        let created = try await store.create(type: .canvas)
+        let session = try await open(created.id)
+        let editor = DocumentEditorController(session: session, assetsURL: nil)
+        editor.loadViewIfNeeded()
+        editor.setHandMode(true)
+        #expect(!editor.canvas.isDrawingEnabled)
+        #expect(editor.canvas.isScrollEnabled)
+        #expect(editor.canvas.maximumZoomScale == 4)
+        editor.setHandMode(false)
+        #expect(editor.canvas.isDrawingEnabled)
+    }
+}
+
+extension EditorSessionTests {
+    @Test func metadataPreferencesDoNotAdvanceAIRevision() async throws {
+        let created = try await store.create(type: .canvas)
+        let session = try await open(created.id), revision = session.revision
+        #expect(session.rename(to: "Metadata title"))
+        session.setGridVisible(false)
+        session.setChatPanelOpen(true)
+        #expect(session.revision == revision && session.hasUnsavedChanges)
+        #expect(await session.saveNow())
+        #expect(!session.hasUnsavedChanges)
+    }
+}

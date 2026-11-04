@@ -1,0 +1,8 @@
+Starting native provider/model checks
+Provider checks passed; starting PencilKit/session checks
+Creating synthetic package
+Opening EditorSession
+Saving session state
+Saving session state
+Passed 61 native contract assertions against repository provider/model sources.
+Passed 19 native PencilKit/session persistence and undo assertions; rendering stubbed.
