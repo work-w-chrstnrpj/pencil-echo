@@ -398,7 +398,12 @@ struct AutoAskTests {
                                blocked: { nil }, schema: Data("{}".utf8))
     }
 
+    /// The newest input the request answers (ticket 017: the image may show more around it).
     func scope(_ ask: AskAIController) -> CGRect? {
+        if case .pending(let capture) = ask.phase { AskAIController.rect(capture.focusFrame) } else { nil }
+    }
+
+    func captured(_ ask: AskAIController) -> CGRect? {
         if case .pending(let capture) = ask.phase { AskAIController.rect(capture.context.scopeFrame) } else { nil }
     }
 
@@ -429,14 +434,15 @@ struct AutoAskTests {
         let ask = controller(document, selection: selection)
         document.edit { $0.drawing.strokes.append(problem) }
         ask.ask()
-        #expect(scope(ask) == selection)
+        // A selection is the exclusive context: the image shows nothing around it.
+        #expect(scope(ask) == selection && captured(ask) == selection)
         ask.cancel()
     }
 
     @Test func withoutNewInkAskUsesTheFallbackRegion() {
         let ask = controller(document())
         ask.ask()
-        #expect(scope(ask) == viewport)
+        #expect(scope(ask) == viewport && captured(ask) == viewport)
         ask.cancel()
     }
 
@@ -575,5 +581,179 @@ struct VisualAnswerTests {
         let smooth = InkAnswer.path(curve)
         #expect(smooth.first == CGPoint(x: 0, y: 0) && smooth.last == CGPoint(x: 100, y: 0))
         #expect(smooth.contains { abs($0.x - 50) < 0.01 && abs($0.y - 40) < 0.01 })
+    }
+}
+
+// Ticket 017: the newest ink is the focus; the image also shows the earlier work around it.
+@MainActor
+struct ContextCaptureTests {
+    let page = Page(id: UUID(), size: PageSize(width: 2_000, height: 2_000), background: .blank)
+    let pageRect = CGRect(x: 0, y: 0, width: 2_000, height: 2_000)
+    let opened = Date(timeIntervalSince1970: 100)
+    /// A maze drawn after the document opened: an outer box and one inner wall.
+    var maze: [PKStroke] {
+        let date = Date(timeIntervalSince1970: 200)
+        return [AutoAskTests.stroke([CGPoint(x: 400, y: 200), CGPoint(x: 700, y: 200), CGPoint(x: 700, y: 450),
+                                     CGPoint(x: 400, y: 450), CGPoint(x: 400, y: 200)], at: date),
+                AutoAskTests.stroke([CGPoint(x: 500, y: 200), CGPoint(x: 500, y: 380)], at: date)]
+    }
+    /// "find path", written under the maze after Auto Ask already sent the maze.
+    var note: PKStroke { AutoAskTests.stroke([CGPoint(x: 460, y: 500), CGPoint(x: 600, y: 520)], at: Date(timeIntervalSince1970: 300)) }
+
+    func document(_ strokes: [PKStroke] = [], objects: [DocumentObject] = []) -> FakeAskDocument {
+        FakeAskDocument(type: .canvas, pages: [page],
+                        strokes: [AutoAskTests.stroke([CGPoint(x: 1_800, y: 1_800), CGPoint(x: 1_850, y: 1_850)], at: opened)] + strokes,
+                        objects: objects)
+    }
+
+    func controller(_ document: FakeAskDocument, answer: String = AskAITests.answer,
+                    delay: Duration = .milliseconds(300)) -> AskAIController {
+        AskAIController(document: document, region: { CGRect(x: 0, y: 0, width: 1_000, height: 800) },
+                        autoAsk: { AutoAskSettings(enabled: false, delaySeconds: 1) },
+                        provider: { (FakeProvider(result: .success(answer), delay: delay), "fake-vision") },
+                        blocked: { nil }, schema: Data("{}".utf8), now: { Date(timeIntervalSince1970: 1_000) })
+    }
+
+    func pending(_ ask: AskAIController) -> AskAICapture? {
+        if case .pending(let capture) = ask.phase { capture } else { nil }
+    }
+
+    /// The maze was already asked about; the note is the only new ink.
+    func mazeThenNote(delay: Duration = .milliseconds(300), answer: String = AskAITests.answer) -> (FakeAskDocument, AskAIController) {
+        let document = document()
+        let ask = controller(document, answer: answer, delay: delay)
+        document.edit { $0.drawing.strokes.append(contentsOf: maze) }
+        ask.ask()
+        ask.cancel()
+        document.edit { $0.drawing.strokes.append(note) }
+        return (document, ask)
+    }
+
+    // MARK: Region
+
+    @Test func contextGrowsToNearbyWorkOnly() {
+        let focus = CGRect(x: 450, y: 480, width: 160, height: 60)
+        let mazeBounds = CGRect(x: 400, y: 200, width: 300, height: 250)
+        let far = CGRect(x: 1_800, y: 1_800, width: 50, height: 50)
+        let region = AskAIController.contextRegion(around: focus, within: pageRect, content: [mazeBounds, far])
+        #expect(region.contains(focus) && region.contains(mazeBounds) && !region.intersects(far))
+        // Nothing nearby: only the capture margin is added.
+        let alone = AskAIController.contextRegion(around: focus, within: pageRect, content: [far])
+        let margin = AskAIController.captureMargin
+        #expect(alone == focus.insetBy(dx: -margin, dy: -margin))
+    }
+
+    @Test func contextIsClippedToThePageAndTheSizeLimit() {
+        let focus = CGRect(x: 10, y: 900, width: 100, height: 60)
+        let huge = CGRect(x: -500, y: 0, width: 3_000, height: 2_000)
+        let region = AskAIController.contextRegion(around: focus, within: pageRect, content: [huge])
+        #expect(region.contains(focus) && pageRect.contains(region))
+        #expect(region.width <= AskAIController.maxContextSide && region.height <= AskAIController.maxContextSide)
+        // The focus is never cut, even when it is larger than the limit.
+        let wide = CGRect(x: 100, y: 100, width: 1_800, height: 100)
+        #expect(AskAIController.contextRegion(around: wide, within: pageRect, content: [huge]).contains(wide))
+    }
+
+    // MARK: Requests
+
+    @Test func noteAfterAnsweredDrawingShowsTheDrawing() throws {
+        let (_, ask) = mazeThenNote()
+        let expectedFocus = note.renderBounds.insetBy(dx: -AskAIController.captureMargin, dy: -AskAIController.captureMargin)
+        #expect(ask.newestInkRegion == expectedFocus)
+        ask.ask()
+        let capture = try #require(pending(ask))
+        let image = AskAIController.rect(capture.context.scopeFrame)
+        #expect(AskAIController.rect(capture.focusFrame) == expectedFocus)
+        #expect(maze.allSatisfy { image.contains($0.renderBounds) } && image.contains(expectedFocus))
+        let png = try #require(UIImage(data: capture.png))
+        #expect(abs(png.size.width - image.width * capture.imageScale) <= 1)
+        let text = CanvasCommandPrompt.instruction(capture.instruction, context: capture.context,
+                                                   imageScale: capture.imageScale, focusFrame: capture.focusFrame)
+        let json = try #require(text.components(separatedBy: "Request: ").last.flatMap { $0.data(using: .utf8) })
+        let request = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
+        let sent = try #require(request["focusFrame"] as? [String: Double])
+        let focus = capture.focusFrame
+        #expect(sent == ["x": focus.x, "y": focus.y, "width": focus.width, "height": focus.height])
+        ask.cancel()
+    }
+
+    @Test func flowingAnswerSitsBesideTheNewestInk() async throws {
+        let (document, ask) = mazeThenNote(delay: .zero)
+        let focus = try #require(ask.newestInkRegion)
+        ask.ask()
+        for _ in 0..<300 where ask.isPending { try await Task.sleep(for: .milliseconds(10)) }
+        let added = try #require(document.snapshot.objects.first)
+        let frame = AskAIController.rect(added.frame)
+        #expect(!document.snapshot.drawing.strokes.contains { $0.renderBounds.intersects(frame) })
+        // Right of the note, on its line: not beside the maze above it.
+        #expect(frame.minX >= focus.maxX && frame.minY < focus.maxY && frame.maxY > focus.minY)
+    }
+
+    @Test func editingEarlierWorkWhilePendingDoesNotNeedReview() async throws {
+        let (document, ask) = mazeThenNote(delay: .milliseconds(100))
+        ask.ask()
+        // A new wall inside the maze: in the image, but outside the newest input.
+        document.edit { $0.drawing.strokes.append(AutoAskTests.stroke([CGPoint(x: 600, y: 260), CGPoint(x: 650, y: 260)], at: opened)) }
+        for _ in 0..<300 where ask.isPending { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(ask.phase == .idle && document.applyCount == 1)
+    }
+
+    @Test func answerPastTheArrowheadKeepsItsFrame() async throws {
+        // Circle + arrow + "why?" with clear space past the arrowhead at x 760.
+        let why = #"{"version":2,"operations":[{"op":"add_object","type":"text","source":"Because the basis is orthonormal.","placement":"at_frame","frame":{"x":760,"y":480,"width":320,"height":40}}],"message":null}"#
+        let (document, ask) = mazeThenNote(delay: .zero, answer: why)
+        ask.ask()
+        for _ in 0..<300 where ask.isPending { try await Task.sleep(for: .milliseconds(10)) }
+        let added = try #require(document.snapshot.objects.first)
+        #expect(added.frame.x == 760 && abs((added.frame.y + added.frame.height / 2) - 500) < 0.5)
+    }
+
+    // MARK: Prompt
+
+    @Test func promptExplainsFocusAndGestures() {
+        let system = CanvasCommandPrompt.system
+        #expect(system.contains("focusFrame") && system.contains("captureFrame"))
+        #expect(system.contains("final arrowhead") && system.contains("never copy the label"))
+        let context = CommandRequestContext(requestId: UUID(), documentId: UUID(), pageId: UUID(), capturedRevision: 1,
+                                            scopeFrame: CommandFrame(x: 0, y: 0, width: 100, height: 80), scopeObjectIds: [],
+                                            pageBounds: CommandFrame(x: 0, y: 0, width: 595, height: 842), allowReplace: false)
+        // Without a focus, the focus is the whole capture.
+        #expect(CanvasCommandPrompt.instruction("", context: context, imageScale: 1)
+            .contains(#""focusFrame":{"height":80,"width":100,"x":0,"y":0}"#))
+    }
+
+    // MARK: Rendering
+
+    @Test func earlierAIAnswersAppearInTheImage() throws {
+        let date = Date(timeIntervalSince1970: 50)
+        func object(_ type: ObjectType, _ source: String, x: Double) -> DocumentObject {
+            DocumentObject(id: UUID(), pageId: page.id, type: type, frame: PageRect(x: x, y: 100, width: 160, height: 120),
+                           zIndex: 0, source: source, assetRefs: [], createdBy: .ai(requestId: UUID()),
+                           createdAt: date, updatedAt: date)
+        }
+        let objects = [object(.text, "x = 4", x: 100), object(.latex, #"\frac{1}{\sqrt{3}}"#, x: 300),
+                       object(.plot, "y = x^2\nx: -2 .. 2", x: 500)]
+        let aiInk = AutoAskTests.stroke([CGPoint(x: 720, y: 120), CGPoint(x: 840, y: 200)], at: InkAnswer.creationDate)
+        let document = document([aiInk], objects: objects)
+        let ask = controller(document)
+        for (index, rect) in (objects.map { AskAIController.rect($0.frame) } + [aiInk.renderBounds]).enumerated() {
+            let capture = try #require(ask.makeCapture(documentRegion: rect.insetBy(dx: -4, dy: -4)))
+            #expect(Self.hasInk(capture.png), "item \(index) is missing from the capture")
+            if index < objects.count { #expect(capture.context.scopeObjectIds.contains(objects[index].id)) }
+        }
+    }
+
+    /// Whether any pixel is clearly darker than the white background.
+    static func hasInk(_ png: Data) -> Bool {
+        guard let image = UIImage(data: png)?.cgImage else { return false }
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        guard let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return stride(from: 0, to: pixels.count, by: 4).contains { index in
+            Int(pixels[index]) + Int(pixels[index + 1]) + Int(pixels[index + 2]) < 3 * 180
+        }
     }
 }

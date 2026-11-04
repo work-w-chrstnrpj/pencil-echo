@@ -27,8 +27,12 @@ struct UnconfiguredProvider: AIProvider {
 }
 
 /// An immutable capture of one request (ticket 010 "Capture").
+/// `context.scopeFrame` is the whole captured image; `focusFrame` is the newest
+/// input inside it (ticket 017). Staleness and flowing placement use the focus.
 struct AskAICapture: Equatable, Sendable {
     var context: CommandRequestContext
+    /// Page points, inside `context.scopeFrame`.
+    var focusFrame: CommandFrame
     var instruction: String
     var png: Data
     var imageScale: Double
@@ -69,8 +73,12 @@ final class AskAIController {
     /// The region of the last newest-ink capture, reused when Ask has no new ink.
     private var lastInkRegion: CGRect?
 
-    static let captureMargin = 24.0
+    nonisolated static let captureMargin = 24.0
     static let maxImageSide = 2048.0
+    /// How far around the newest ink to look for earlier work it may refer to (ticket 017).
+    nonisolated static let contextReach = 200.0
+    /// Longest side of the context region, so one large drawing can't shrink the image too much.
+    nonisolated static let maxContextSide = 1_600.0
 
     init(document: AskAIDocument, region: @escaping () -> CGRect,
          selection: @escaping () -> CGRect? = { nil },
@@ -115,8 +123,17 @@ final class AskAIController {
         autoTask?.cancel()
         autoTask = nil
         let newest = newestInkRegion
-        let documentRegion = selection() ?? newest ?? lastInkRegion.flatMap { hasInk(in: $0) ? $0 : nil } ?? region()
-        guard let capture = makeCapture(documentRegion: documentRegion) else {
+        // A lasso selection is the exclusive context. Newest ink gets the earlier work
+        // around it as context (ticket 017); the viewport fallback is already wide.
+        let focus: CGRect, withContext: Bool
+        if let selected = selection() {
+            (focus, withContext) = (selected, false)
+        } else if let ink = newest ?? lastInkRegion.flatMap({ hasInk(in: $0) ? $0 : nil }) {
+            (focus, withContext) = (ink, true)
+        } else {
+            (focus, withContext) = (region(), false)
+        }
+        guard let capture = makeCapture(documentRegion: focus, withContext: withContext) else {
             phase = .idle
             return
         }
@@ -215,16 +232,24 @@ final class AskAIController {
 
     // MARK: - Capture
 
-    /// Clips the region to the page under its center and renders it.
-    func makeCapture(documentRegion: CGRect) -> AskAICapture? {
+    /// Clips the region to the page under its center and renders it. With `withContext`,
+    /// the region is the focus and the image also shows the earlier work around it.
+    func makeCapture(documentRegion: CGRect, withContext: Bool = false) -> AskAICapture? {
         let layout = document.layout, snapshot = document.snapshot
         guard !snapshot.pages.isEmpty, documentRegion.width > 0, documentRegion.height > 0 else { return nil }
         let index = layout.pageIndex(nearestY: documentRegion.midY)
         let pageDocument = layout.pageRect(index)
-        let clipped = documentRegion.intersection(pageDocument)
-        guard !clipped.isNull, clipped.width >= 8, clipped.height >= 8 else { return nil }
+        let focus = documentRegion.intersection(pageDocument)
+        guard !focus.isNull, focus.width >= 8, focus.height >= 8 else { return nil }
         let page = snapshot.pages[index]
+        var clipped = focus
+        if withContext {
+            let content = snapshot.drawing.strokes.map(\.renderBounds).filter { $0.intersects(pageDocument) }
+                + snapshot.objects.filter { $0.pageId == page.id }.map(layout.documentFrame(of:))
+            clipped = Self.contextRegion(around: focus, within: pageDocument, content: content)
+        }
         let scope = clipped.offsetBy(dx: -pageDocument.minX, dy: -pageDocument.minY)
+        let focusScope = focus.offsetBy(dx: -pageDocument.minX, dy: -pageDocument.minY)
         let scale = min(2, Self.maxImageSide / max(scope.width, scope.height))
         let scopeObjects = snapshot.objects.filter { $0.pageId == page.id && Self.rect($0.frame).intersects(scope) }
         let context = CommandRequestContext(
@@ -236,9 +261,28 @@ final class AskAIController {
         let png = RegionCapture.render(drawing: snapshot.drawing, documentRect: clipped,
                                        objects: scopeObjects, pageOrigin: pageDocument.origin, scale: scale)
         let fingerprint = ScopeFingerprint.make(strokes: snapshot.drawing.strokes, objects: snapshot.objects,
-                                                pageId: page.id, scope: scope, pageOrigin: pageDocument.origin)
-        return AskAICapture(context: context, instruction: instruction, png: png, imageScale: scale,
-                            fingerprint: fingerprint)
+                                                pageId: page.id, scope: focusScope, pageOrigin: pageDocument.origin)
+        return AskAICapture(context: context, focusFrame: Self.frame(focusScope), instruction: instruction, png: png,
+                            imageScale: scale, fingerprint: fingerprint)
+    }
+
+    /// The focus plus every stroke or object frame that comes within `contextReach`
+    /// (or half the focus size) of it, with the capture margin, at most
+    /// `maxContextSide` per side around the focus, inside `page`. Document space.
+    nonisolated static func contextRegion(around focus: CGRect, within page: CGRect, content: [CGRect]) -> CGRect {
+        let reach = max(contextReach, max(focus.width, focus.height) / 2)
+        let near = focus.insetBy(dx: -reach, dy: -reach)
+        let grown = content.filter { $0.intersects(near) }.reduce(focus) { $0.union($1) }
+            .insetBy(dx: -captureMargin, dy: -captureMargin)
+        func span(_ low: CGFloat, _ high: CGFloat, keeping focusLow: CGFloat, _ focusHigh: CGFloat) -> (CGFloat, CGFloat) {
+            guard high - low > maxContextSide else { return (low, high) }
+            guard focusHigh - focusLow < maxContextSide else { return (focusLow, focusHigh) }
+            let start = min(max((focusLow + focusHigh) / 2 - maxContextSide / 2, low), high - maxContextSide)
+            return (start, start + maxContextSide)
+        }
+        let x = span(grown.minX, grown.maxX, keeping: focus.minX, focus.maxX)
+        let y = span(grown.minY, grown.maxY, keeping: focus.minY, focus.maxY)
+        return CGRect(x: x.0, y: y.0, width: x.1 - x.0, height: y.1 - y.0).intersection(page).union(focus)
     }
 
     // MARK: - Request
@@ -256,7 +300,8 @@ final class AskAIController {
         let request = AIRequest(requestId: capture.context.requestId, model: model,
                                 systemPrompt: CanvasCommandPrompt.system,
                                 instruction: CanvasCommandPrompt.instruction(capture.instruction, context: capture.context,
-                                                                             imageScale: capture.imageScale),
+                                                                             imageScale: capture.imageScale,
+                                                                             focusFrame: capture.focusFrame),
                                 pngImages: [capture.png], jsonSchema: schema)
         task = Task { [weak self] in
             var text: String?
@@ -301,7 +346,7 @@ final class AskAIController {
         if ignoringScopeChange { changed = false }
         else if let pageIndex {
             changed = ScopeFingerprint.make(strokes: snapshot.drawing.strokes, objects: snapshot.objects,
-                                            pageId: capture.context.pageId, scope: Self.rect(capture.context.scopeFrame),
+                                            pageId: capture.context.pageId, scope: Self.rect(capture.focusFrame),
                                             pageOrigin: layout.pageRect(pageIndex).origin) != capture.fingerprint
         } else { changed = true }
         // Staleness needs a changed revision *and* a changed scope, so `placeAnyway`
@@ -378,7 +423,8 @@ enum AnswerApplier {
                       capture: AskAICapture, date: Date) -> EditorSnapshot? {
         guard var pageIndex = layout.pageIndex(of: capture.context.pageId) else { return nil }
         var next = snapshot
-        let scope = AskAIController.rect(capture.context.scopeFrame)
+        // Flowing answers go beside the newest input, not beside the whole context image.
+        let scope = AskAIController.rect(capture.focusFrame)
         var zIndex = (snapshot.objects.map(\.zIndex).max() ?? -1) + 1
         func makeObject(_ type: CanvasObjectType, _ source: String, _ frame: CGRect, page: Int) -> DocumentObject {
             defer { zIndex += 1 }

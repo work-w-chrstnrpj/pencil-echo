@@ -45,7 +45,7 @@ Ticket files live in `tickets/`. Owner decisions: signing with a free Apple ID P
 | [014 Auto Ask on pause and inline answers](../../tickets/014-auto-ask-on-pause-and-inline-answers.md) | PE-002 | Claude (simulator verified; owner A16 + real provider pending) | 010 |
 | [015 Full PencilKit tool set](../../tickets/015-full-pencilkit-tool-set.md) | PE-001 | Claude (simulator verified; owner A16 pending) | 008 |
 | [016 Visual answers: plots and drawings](../../tickets/016-visual-answers-plots-and-drawings.md) | PE-003 | Claude (fixture-tested, installed on A16; real provider pending) | 006, 010, 014 |
-| [017 Pen gestures and context capture](../../tickets/017-pen-gestures-and-context-capture.md) | PE-003 | Unassigned (open) | 010, 014 |
+| [017 Pen gestures and context capture](../../tickets/017-pen-gestures-and-context-capture.md) | PE-003 | Claude (implemented and unit-tested; owner A16 + real provider pending) | 010, 014 |
 | [018 Diagram drawing primitives](../../tickets/018-diagram-drawing-primitives.md) | PE-003 | Unassigned (open) | 016 |
 | [019 Precise ink on existing work](../../tickets/019-precise-ink-on-existing-work.md) | PE-003 | Unassigned (open) | 016, 017 |
 

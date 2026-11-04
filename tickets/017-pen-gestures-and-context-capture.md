@@ -1,6 +1,6 @@
 # 017 — Pen gestures and context around the newest ink
 
-Milestone: PE-003 · Status: Open · Owner: Unassigned · Depends on: 010, 014
+Milestone: PE-003 · Status: In Progress — implemented and unit-tested (2026-11-04); owner A16 run with a real provider pending · Owner: Claude (implementation; reviews 018–022) · Depends on: 010, 014
 
 ## What
 
@@ -39,7 +39,7 @@ Upstream handles both: `inspiration/src/server/canvas-command-prompt.js` line 12
 ## Acceptance
 
 - [ ] Circling a step of an earlier AI answer, drawing an arrow and writing "why?" places an explanation of that step past the arrowhead, without copying "why?". *(Real provider, A16.)*
-- [ ] Drawing a maze, pausing until Auto Ask fires, then writing "find path" sends a capture that contains the whole maze. *(Unit test on the region; real provider for the answer.)*
+- [ ] Drawing a maze, pausing until Auto Ask fires, then writing "find path" sends a capture that contains the whole maze. *(Capture verified by `noteAfterAnsweredDrawingShowsTheDrawing`; the answer needs a real provider.)*
 - [ ] Sketching a curve, then writing "what func will this be like?" next to it, gets an answer about that curve. *(Real provider.)*
 
 ## Automated checks
@@ -56,3 +56,13 @@ Owner A16 run with a real provider (Qwen first) for the three demo cases above.
 ## Stop conditions
 
 Stop and ask the owner if a larger context region makes requests noticeably slower or more expensive on the selected provider, or if models routinely answer the old context instead of the newest ink.
+
+## Implementation notes (2026-11-04)
+
+- **Focus and context:** `AskAICapture.focusFrame` is the newest input; `context.scopeFrame` is the whole image (`captureFrame`). Only newest-ink requests get context. A lasso selection and the viewport fallback are sent unchanged.
+- **Context region** (`AskAIController.contextRegion`): the focus plus every stroke or object frame within 200 pt (or half the focus's longest side), plus the 24 pt margin. Each side is at most 1,600 pt around the focus, clipped to the focus's page. The focus is never cut.
+- **Staleness and placement use the focus:** editing earlier work inside the image while a request is pending doesn't need review, and `right_of_scope`/`below_scope` answers sit beside the newest ink, not beside the whole image.
+- **Prompt:** the request sends `focusFrame` next to `captureFrame`. The system prompt explains the two regions and ports the upstream gesture rules (circle/box selects, arrow links, labels like "why" ask for detail and are never copied, answer past the final arrowhead, language of the selected content). Provenance is in `CanvasCommandPrompt.swift` and `docs/reuse-inventory.md`.
+- **AI objects in the capture:** already rendered by `RegionCapture`; `earlierAIAnswersAppearInTheImage` checks text, LaTeX, plot and AI ink pixels.
+- **Verified:** 209 unit tests pass in 18 suites (8 new in `ContextCaptureTests`, 2 updated in `AutoAskTests`). UI tests weren't run; this change doesn't touch the library or editor UI.
+

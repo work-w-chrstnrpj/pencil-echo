@@ -1,5 +1,7 @@
 // Ported from PenEcho inspiration/src/server/canvas-command-prompt.js @ 341e34d (AGPL-3.0-only).
 // Translated and trimmed to canvas commands v1 (docs/api/canvas-commands-v1.md, "Prompt contract").
+// Focus/context regions and pen-gesture rules: ticket 017, from the same file's spatial editing
+// rules (line 127) and latestInput/captureRect contract (line 720).
 import Foundation
 
 /// Prompt text for one Ask AI request (ticket 010).
@@ -9,6 +11,12 @@ enum CanvasCommandPrompt {
     static let system = """
     You are the solving assistant inside Pencil Echo, a handwriting notebook. The attached image is a \
     clean rendering of the user's work in the captured region of one page.
+
+    The request gives two regions in page points. captureFrame is the whole image. focusFrame, inside \
+    it, holds the newest input: that is what to respond to. Everything outside focusFrame is earlier \
+    work, shown only so you can tell what the newest input refers to, such as the drawing a short note \
+    points at or the step a circle surrounds. Never answer, repeat or redo earlier work unless the \
+    newest input asks about it.
 
     Return exactly one JSON object that matches the supplied schema (version 2). No prose, no Markdown \
     fences, no alternatives.
@@ -40,12 +48,21 @@ enum CanvasCommandPrompt {
     details. Draw the whole subject recognizably; label parts with separate text objects only when \
     asked. To mark existing work (circle, underline, arrow), use draw_ink with at_frame over it.
 
+    Pen gestures (ported from the upstream spatial editing rules): read hand-drawn marks in the newest \
+    input as instructions, not as text. A circle or box around content selects or references it. An \
+    arrow connects the selected content to a destination. Labels next to a selection or arrow such as \
+    "why", "more", "detail", "expand" or "explain" ask for a fuller explanation of the selected \
+    content; never copy the label into the answer. Follow a chain of arrows to its final arrowhead and \
+    put the answer there with at_frame, in the clear space just beyond the final arrowhead and not over \
+    any ink. If the newest input is only such a label, reply in the language of the selected content.
+
     Placement: when the answer completes a line, such as after an equals sign or in a blank, use \
     at_frame right where it belongs: x just after the last ink of that line, the frame vertically \
     centered on that line, height about the handwriting height and width just enough for the answer. \
     Its frame is in page points: pageX = captureFrame.x + imageX / imageScale and \
     pageY = captureFrame.y + imageY / imageScale, and it must stay inside pageBounds. Otherwise use \
-    right_of_scope with frame null, or below_scope with frame null for wide content.
+    right_of_scope with frame null, or below_scope with frame null for wide content; both place the \
+    answer next to focusFrame.
 
     edit_object and delete_object are not allowed unless the request says allowReplace is true.
 
@@ -55,13 +72,16 @@ enum CanvasCommandPrompt {
     """
 
     /// The user turn: instruction plus the geometry the model needs for `at_frame`.
-    static func instruction(_ text: String, context: CommandRequestContext, imageScale: Double) -> String {
+    /// `focusFrame` is the newest input inside the capture (ticket 017); nil means the whole capture.
+    static func instruction(_ text: String, context: CommandRequestContext, imageScale: Double,
+                            focusFrame: CommandFrame? = nil) -> String {
         func rect(_ frame: CommandFrame) -> [String: Double] {
             ["x": frame.x, "y": frame.y, "width": frame.width, "height": frame.height]
         }
         let request: [String: Any] = [
             "schemaVersion": 2,
             "captureFrame": rect(context.scopeFrame),
+            "focusFrame": rect(focusFrame ?? context.scopeFrame),
             "imageScale": imageScale,
             "pageBounds": rect(context.pageBounds),
             "allowReplace": context.allowReplace,
