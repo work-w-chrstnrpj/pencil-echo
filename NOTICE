@@ -1,0 +1,21 @@
+Pencil Echo
+Copyright (C) 2026 Pencil Echo contributors
+
+Open-source license: GNU Affero General Public License v3.0 only
+SPDX-License-Identifier: AGPL-3.0-only
+
+Pencil Echo is an independent native iPad project based on PenEcho
+(Copyright (C) 2026 PenEcho authors and contributors, AGPL-3.0-only).
+Files ported from PenEcho carry a provenance header naming the upstream
+file and commit (341e34d); docs/reuse-inventory.md lists them. Pencil Echo
+is not an official PenEcho release and is not endorsed by the PenEcho
+project. It uses none of the PenEcho name, wordmark, logo or pen-nib mark
+as its own identity; see the upstream TRADEMARKS.md.
+
+Third-party software
+--------------------
+
+SwiftMath 1.7.3 (https://github.com/mgriebling/SwiftMath), MIT License,
+is used to render LaTeX. Its license is bundled at
+application/App/Resources/ThirdPartyNotices/SwiftMath-LICENSE.txt and shown
+in the app under AI Settings > About > Third-party notices.

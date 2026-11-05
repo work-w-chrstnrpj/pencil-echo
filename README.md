@@ -1,25 +1,48 @@
 # Pencil Echo
 
-An open-source, native Swift iPad app based on the PenEcho reference in `inspiration/`.
+A native iPad notebook where you write with Apple Pencil and AI answers beside your ink, as editable text, math, plots and drawings.
 
-Write a problem with Apple Pencil, ask AI to solve or explain it, and receive an editable answer on the board. Documents stay local without an account; AI requests use the user's configured provider and API key.
+Pencil Echo is written in Swift with SwiftUI, UIKit and PencilKit for iPadOS 27. Documents stay on the iPad with no account. AI requests go only to the provider you configure, with your own API key, or to Claude Code on your Mac through your Claude subscription.
 
-## Current state
+> Based on [PenEcho](https://github.com/penecho/penecho) (AGPL-3.0-only). Pencil Echo is an independent project, not an official PenEcho release.
 
-Ticket 002 adds a native SwiftUI iPad scaffold, the shared PencilEcho build scheme and three unit-test placeholders. The home screen is now a local document grid: New Canvas/New Notebook create saved documents and open the native editor. Long-press items to rename or confirm permanent deletion; trash is not available yet. See [library behavior and evidence](docs/testing/library-009.md). Ticket 004 adds a Debug-only PencilKit/object-layer experiment with lasso/move, undo and synthetic-load monitoring; [simulator evidence and pending device checks](docs/spikes/004-ink-object-layer.md) are recorded separately. Native document storage/command validation (005/006) and a generic provider service with a Qwen Debug screen (007) are implemented; [real-provider acceptance](docs/api/providers.md) and the integrated physical-device workflow remain pending. Ticket 011 adds editable native Markdown and LaTeX objects with a live source preview, one-step edit undo, automatic height and zoom rendering; see [renderer limits and evidence](docs/testing/rich-text-011.md). Ticket 013 adds native Anthropic/Gemini streaming through the AI Settings provider picker, with synthetic fixture verification; live requests remain [not verified](docs/api/providers.md#native-anthropic-and-gemini-adapters--ticket-013). The root Node package and scripts belong to the copied AI template, not the iPad runtime. The workspace root is not currently a Git repository; `inspiration/` is a separate cloned repository.
+## Features (v0.1.0)
 
-Initial acceptance device: iPad A16 with Apple Pencil USB-C, verified iPadOS 27.0.1 (24A446). Xcode 27.0 / iPadOS 27.0 SDK compatibility is recorded in ticket 001. Open `application/PencilEcho.xcodeproj` to develop the app; see [native verification commands](docs/testing/test-specification.md).
+- **Canvas and A4 notebooks** with every PencilKit tool, page styles and autosave.
+- **Ask AI and Auto answer:** pause after writing and the answer appears beside your newest ink. Circle, arrow and "why?" gestures, and context around the new ink.
+- **Editable answers:** text, Markdown, LaTeX, function plots and native ink drawings, including diagram strokes (arcs, waves, arrowheads, labels) and page-precise overlays such as maze paths.
+- **Agent chat** about a selection or the visible page, with answers placed as drafts you accept or discard.
+- **Claude Code on your Mac** can see a shared page and place answers over your home Wi-Fi (encrypted, paired, foreground only). See [MCP](docs/api/mcp.md).
+- **Providers:** Qwen, OpenAI, Anthropic, OpenRouter, Gemini, Cerebras, Groq, Hugging Face, Mistral, NVIDIA and custom OpenAI-compatible endpoints. Keys stay in the iPad's Keychain.
+- **Library** with Recent, Favorites, search, sort, grid and list.
+- **iPadOS 26+ design:** one Liquid Glass command bar, a floating selection bar, inspectors, and a Liquid Glass app icon.
+
+## Requirements
+
+- iPad on iPadOS 27 (tested on iPad A16 with Apple Pencil USB-C) and a Mac with Xcode 27.
+- For AI: an API key for a supported provider, or Claude Code signed in with a Claude subscription.
+
+## Build and install
+
+Open `application/PencilEcho.xcodeproj`, choose the `PencilEcho` scheme and your iPad, and run. A free Apple ID (Personal Team) is enough; the build expires after 7 days. Command-line steps: [deployment](docs/deployment/deployment.md).
+
+To use Claude Code, build the Mac helper and follow [Claude Code on the Mac](docs/deployment/deployment.md#claude-code-on-the-mac-ticket-023):
+
+```bash
+swift build -c release --package-path tools/mcp-bridge
+```
 
 ## Documentation
 
 - [Product requirements](docs/product-specification/product-specification.md)
 - [Technical intent](docs/tdd/tdd.md)
-- [Milestones and acceptance](docs/development-plan/development-plan.md)
-- [Decision record and open gates](docs/decisions.md)
-- [Project structure](docs/project-structure/project-structure.md)
+- [Milestones and tickets](docs/development-plan/development-plan.md)
+- [Decision record](docs/decisions.md)
+- [UI style guide](docs/design/ui-style-guide.md)
 - [Testing](docs/testing/test-specification.md)
 - [Deployment](docs/deployment/deployment.md)
+- [Changelog](CHANGELOG.md)
 
-## Reference and reuse
+## License
 
-Reference baseline: `inspiration/` commit `341e34d6cf2965ac8f58d0d89cf33e285ace9b2d` (upstream main, package version 1.4.2, updated 2026-11-03). Later upstream changes require deliberate review. Desktop file compatibility is not a requirement. The owner has approved copying and porting upstream code/assets because this project is private and experimental (see `docs/decisions.md`); retain provenance and applicable notices. Use distinct Pencil Echo branding; review upstream `LICENSE`, `NOTICE`, and `TRADEMARKS.md` before incorporating material. The copied template's MIT license/package metadata does not establish licensing for an upstream-derived application.
+GNU Affero General Public License v3.0 only (`AGPL-3.0-only`); see [LICENSE](LICENSE) and [NOTICE](NOTICE). Files ported from PenEcho keep a provenance header and are listed in [docs/reuse-inventory.md](docs/reuse-inventory.md). The upstream reference clone in `inspiration/` is not part of this repository.

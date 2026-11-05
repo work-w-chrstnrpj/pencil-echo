@@ -1,10 +1,42 @@
 # Changelog
 
-All notable changes to this project template are documented in this file.
+All notable changes to Pencil Echo are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+## [0.1.0] — 2026-11-05
 
-## [0.1.0] — Template Initialization
+First public release. An early preview: simulator-tested, with hands-on Apple Pencil, VoiceOver and real-provider checks still open (see "Known limitations").
+
+### Added
+
+- **Documents:** canvas and A4 notebook documents saved locally as `.pencilecho` packages, every PencilKit tool, page styles, autosave, undo/redo (tickets 005, 008, 015).
+- **Library:** Recent, Favorites, Canvases and Notebooks with counts, title search, sort, grid and list, rename and delete (009, 022, 025).
+- **Ask AI:** capture of the newest ink or a selection, validated answers placed beside the work, review when the page changed, manual retry (006, 010).
+- **Auto answer** after a pause you choose (1–10 s), answering the newest ink directly (014).
+- **Editable answers:** text in a handwriting style, Markdown, LaTeX (SwiftMath), function plots and native ink drawings (011, 016).
+- **Pen gestures and context:** circle, box and arrow gestures, "why?"-style labels, and earlier work around the newest ink sent as context (017).
+- **Diagram strokes:** arcs, rectangles, wavy and zigzag lines, arrowheads, fills and labels (018). **Precise overlays** in page coordinates with a magnified focus image, for maze paths and marks on existing work (019).
+- **Agent chat** in an inspector, using a selection or the visible page, with drafts you accept or discard (021).
+- **Providers:** Qwen first; OpenAI, Anthropic, OpenRouter, Gemini, Cerebras, Groq, Hugging Face, Mistral, NVIDIA and custom OpenAI-compatible endpoints; native Anthropic and Gemini adapters; reasoning levels for supported models; keys in the Keychain (007, 012, 013, 020).
+- **Claude Code on the Mac** (`pencilecho-mcp`): an MCP bridge over TLS-PSK on the local network with pairing, foreground-only sharing and validated draft placement (023).
+- **Design:** one Liquid Glass navigation bar with title menu, Select / Insert / View, Ask AI and answer mode; floating selection bar; inspectors; glass cards; restyled Settings, Chat and Claude Code popover; HIG style guide; Liquid Glass app icon made with Icon Composer (024–027).
+
+### Fixed
+
+- Draft ink from chat and Claude Code was invisible on the canvas (PencilKit doesn't draw strokes dated before 1970); draft markers are now positive.
+- Panel titles and Done buttons leaked into the editor's navigation bar.
+- Renaming from the editor's title menu didn't apply.
+
+### Known limitations
+
+- Not yet verified on a physical iPad with Apple Pencil, VoiceOver, Split View, or real AI providers and Claude Code; simulator and fixture tests only (258 unit tests, 9 UI journeys).
+- Builds signed with a free Apple ID expire after 7 days.
+- Interactive widgets, simulations and 3D are not included.
+
+### License
+
+- Licensed under **AGPL-3.0-only**, because Pencil Echo includes code ported from PenEcho (AGPL-3.0-only). The template's MIT placeholder is replaced; see `NOTICE`.
+
+## [0.0.0] — Template initialization
 
 ### Added
 
