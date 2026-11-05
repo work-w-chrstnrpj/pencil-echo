@@ -1,70 +1,171 @@
 import SwiftUI
 
+/// Agent chat panel (tickets 021, 026): message bubbles, a pinned input bar with the
+/// context chip and Send, a drafts bar and inline errors. Layout only; every action
+/// goes to `AgentChatController` as before. Rules: docs/design/ui-style-guide.md.
 struct AgentChatView: View {
     @Bindable var controller: AgentChatController
     let onClose: () -> Void
 
+    private var messages: [ConversationMessage] { controller.session.chatHistory.messages }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 16) {
-                            if controller.session.chatHistory.messages.isEmpty && !controller.isPending {
-                                Text("Ask about your drawing. Answers appear here and as editable drafts beside your work.")
-                                    .foregroundStyle(.secondary)
-                            }
-                            ForEach(controller.session.chatHistory.messages) { message in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(message.role == .user ? "You" : "Assistant").font(.caption.bold())
-                                    Text(message.text).textSelection(.enabled)
-                                }.frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            if controller.isPending {
-                                Text(controller.pendingInstruction).font(.callout)
-                                HStack { ProgressView(); Text("Working…"); Spacer(); Button("Cancel") { controller.cancel() } }
-                                if !controller.streamingReply.isEmpty { Text(controller.streamingReply).textSelection(.enabled) }
-                            }
-                            Color.clear.frame(height: 1).id("latest")
-                        }.padding()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(messages) { message in
+                            ChatBubble(text: message.text, fromUser: message.role == .user)
+                        }
+                        if controller.isPending { pendingBubbles }
+                        Color.clear.frame(height: 1).id("latest")
                     }
-                    .onChange(of: controller.streamingReply) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
-                    .onChange(of: controller.session.chatHistory.messages.count) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
+                    .padding(16)
                 }
-                if let error = controller.error { Text(error).font(.callout).foregroundStyle(.red).padding(.horizontal).accessibilityIdentifier("chat-error") }
-                if controller.session.hasDrafts { draftActions }
-                VStack(alignment: .leading, spacing: 8) {
-                    Button(controller.effectiveScope.rawValue, systemImage: controller.effectiveScope == .selection ? "lasso" : "viewfinder") {
-                        controller.scope = controller.scope == .selection ? .visiblePage : .selection
-                    }.accessibilityLabel("Chat context").accessibilityValue(controller.effectiveScope.rawValue)
-                        .accessibilityHint("Switches between the current selection and visible page")
-                        .frame(minHeight: 44)
-                    HStack(alignment: .bottom) {
-                        TextField("Ask about this page", text: $controller.input, axis: .vertical)
-                            .lineLimit(1...5).textFieldStyle(.roundedBorder).accessibilityIdentifier("chat-input")
-                            .accessibilityHint("Type or use the keyboard microphone to dictate a request")
-                        Button("Send", systemImage: "arrow.up.circle.fill") { controller.send() }
-                            .labelStyle(.iconOnly).font(.title2).frame(width: 44, height: 44)
-                            .accessibilityHint("Sends this image and recent chat to the selected AI provider")
-                            .disabled(!controller.canSend).keyboardShortcut(.return, modifiers: .command)
+                .overlay {
+                    if messages.isEmpty && !controller.isPending {
+                        ContentUnavailableView("Ask about your page", systemImage: "bubble.left.and.text.bubble.right",
+                                               description: Text("Answers appear here and as editable drafts on the page."))
                     }
-                }.padding(.horizontal).padding(.bottom)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: controller.streamingReply) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
+                .onChange(of: messages.count) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
+                .onChange(of: controller.isPending) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
             .navigationTitle("Agent chat").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("New chat") { controller.newChat() }.disabled(controller.session.isReadOnly).accessibilityHint("Clears text history; keeps existing drafts and canvas work") }
-                ToolbarItem(placement: .topBarTrailing) { Button("Close", action: onClose).accessibilityHint("Closes the panel and keeps this conversation") }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("New chat") { controller.newChat() }
+                        .disabled(controller.session.isReadOnly)
+                        .accessibilityHint("Clears text history; keeps existing drafts and canvas work")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close", action: onClose).accessibilityHint("Closes the panel and keeps this conversation")
+                }
             }
         }
     }
 
-    private var draftActions: some View {
+    // MARK: - Pending
+
+    @ViewBuilder private var pendingBubbles: some View {
+        ChatBubble(text: controller.pendingInstruction, fromUser: true)
         HStack {
-            Button("Accept all") { controller.session.acceptAllDrafts() }.buttonStyle(.borderedProminent)
-                .accessibilityHint("Keeps all drafts as normal editable content; can be undone")
-            Button("Discard all", role: .destructive) { controller.session.discardAllDrafts() }.buttonStyle(.bordered)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Working…").foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    Button("Cancel") { controller.cancel() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                if !controller.streamingReply.isEmpty {
+                    Text(controller.streamingReply).textSelection(.enabled)
+                }
+            }
+            .padding(12)
+            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Spacer(minLength: 48)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Assistant is working")
+    }
+
+    // MARK: - Bottom bar
+
+    private var bottomBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let error = controller.error {
+                Label {
+                    Text(error).foregroundStyle(.primary)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                .font(.callout)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("chat-error")
+            }
+            if controller.session.hasDrafts { draftsBar }
+            HStack(alignment: .bottom, spacing: 8) {
+                scopeChip
+                TextField("Ask about this page", text: $controller.input, axis: .vertical)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityIdentifier("chat-input")
+                    .accessibilityHint("Type or use the keyboard microphone to dictate a request")
+                Button("Send", systemImage: "arrow.up") { controller.send() }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .disabled(!controller.canSend)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .accessibilityHint("Sends this image and recent chat to the selected AI provider")
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(.bar)
+    }
+
+    private var scopeChip: some View {
+        Menu {
+            Picker("Context", selection: $controller.scope) {
+                Label("Selection", systemImage: "lasso").tag(AgentChatController.Scope.selection)
+                Label("Visible page", systemImage: "viewfinder").tag(AgentChatController.Scope.visiblePage)
+            }
+        } label: {
+            Label(controller.effectiveScope.rawValue, systemImage: controller.effectiveScope == .selection ? "lasso" : "viewfinder")
+                .labelStyle(.iconOnly)
+                .frame(width: 44, height: 44)
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .accessibilityLabel("Chat context")
+        .accessibilityValue(controller.effectiveScope.rawValue)
+        .accessibilityHint("Chooses between the current selection and the visible page")
+    }
+
+    private var draftsBar: some View {
+        let count = controller.session.objects.filter { $0.isDraft == true }.count + controller.session.draftInk.count
+        return HStack(spacing: 8) {
+            Label(count == 1 ? "1 draft on the page" : "\(count) drafts on the page", systemImage: "square.dashed")
+                .font(.callout)
+            Spacer(minLength: 8)
+            Button("Discard all", role: .destructive) { controller.session.discardAllDrafts() }
+                .buttonStyle(.bordered)
                 .accessibilityHint("Removes all drafts; can be undone")
-        }.frame(minHeight: 44).disabled(controller.session.isReadOnly)
+            Button("Accept all") { controller.session.acceptAllDrafts() }
+                .buttonStyle(.borderedProminent)
+                .accessibilityHint("Keeps all drafts as normal editable content; can be undone")
+        }
+        .controlSize(.small)
+        .disabled(controller.session.isReadOnly)
+    }
+}
+
+/// One message: the user's on the trailing side in the tint color, the assistant's leading.
+private struct ChatBubble: View {
+    let text: String
+    let fromUser: Bool
+
+    var body: some View {
+        HStack {
+            // The minimum spacer keeps a bubble to about 85 % of the panel width.
+            if fromUser { Spacer(minLength: 48) }
+            Text(text)
+                .textSelection(.enabled)
+                .foregroundStyle(fromUser ? Color.white : Color.primary)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(fromUser ? AnyShapeStyle(.tint) : AnyShapeStyle(Color(uiColor: .secondarySystemBackground)),
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .fixedSize(horizontal: false, vertical: true)
+            if !fromUser { Spacer(minLength: 48) }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel((fromUser ? "You: " : "Assistant: ") + text)
     }
 }
 

@@ -159,7 +159,9 @@ final class AISettingsModel {
     }
 }
 
-/// AI provider settings (ticket 012): provider, endpoint, model, key and a connection test.
+/// AI settings (tickets 012, 026): provider, endpoint, saved connections, answers,
+/// appearance, privacy and about. Layout follows docs/design/ui-style-guide.md; every
+/// control keeps its stored setting and behavior from before.
 struct AISettingsView: View {
     private static var notices: String {
         guard let root = Bundle.main.url(forResource: "ThirdPartyNotices", withExtension: nil),
@@ -176,149 +178,217 @@ struct AISettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Saved AI connections") {
-                    ForEach(ProviderCatalog.all.filter { model.settings.providers[$0.id] != nil || $0.id == model.presetID }) { preset in
-                        Button { model.select(preset.id) } label: {
-                            LabeledContent(preset.displayName, value: model.settings.settings(for: preset.id).model)
-                        }.accessibilityHint("Switch to this saved provider and model")
-                    }
-                }
-                Section("Canvas preferences") {
-                    Picker("AI font", selection: $canvasSettings.appearance.font) {
-                        ForEach(AIAnswerAppearance.Font.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                    }
-                    Toggle("Thinking indicator", isOn: $canvasSettings.thinkingIndicator)
-                }.onChange(of: canvasSettings) { _, value in value.save() }
-                Section("About") {
-                    LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                    NavigationLink("Third-party notices") {
-                        ScrollView { Text(Self.notices).font(.footnote).padding() }.navigationTitle("Third-party notices")
-                    }
-                }
-
-                Section {
-                    Picker("Provider", selection: Binding(get: { model.presetID }, set: { model.select($0) })) {
-                        ForEach(ProviderCatalog.all) { Text($0.displayName).tag($0.id) }
-                    }
-                } footer: {
-                    Text("Ask AI uses only this provider. If a request fails, it is never sent to another one.")
-                }
-
-                Section("Endpoint") {
-                    TextField(model.presetID == ProviderCatalog.customID ? "https://example.com/v1" : model.preset?.baseURL.absoluteString ?? "",
-                              text: Binding(get: { model.current.baseURLOverride ?? "" }, set: { model.setBaseURL($0) }))
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    if model.effectiveBaseURL == nil {
-                        Label("Enter an HTTPS base URL, such as https://example.com/v1.", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
-                    } else {
-                        LabeledContent("Requests go to", value: model.effectiveBaseURL?.absoluteString ?? "")
-                    }
-                }
-
-                Section {
-                    TextField("Model ID", text: Binding(get: { model.model }, set: { model.setModel($0) }))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Toggle(isOn: Binding(get: { model.modelHasVision }, set: { model.setVision($0) })) {
-                        Label("Reads images (vision)", systemImage: "eye")
-                    }
-                    if let preset = model.preset, !preset.defaultModels.isEmpty {
-                        Menu("Suggested models") {
-                            ForEach(preset.defaultModels) { suggestion in
-                                Button { model.setModel(suggestion.id) } label: {
-                                    Label(suggestion.id, systemImage: suggestion.capabilities.vision ? "eye" : "text.alignleft")
-                                }
-                            }
-                        }
-                    }
-                    if model.preset?.authStyle == .bearer {
-                        Button("Fetch models from provider") { model.fetchModels() }
-                            .disabled(model.isBusy || model.effectiveBaseURL == nil)
-                    } else {
-                        Text("Uses the suggested model list. You can also enter a model ID and set its vision support.").font(.caption).foregroundStyle(.secondary)
-                    }
-                    ForEach(model.discovered.prefix(200)) { found in
-                        Button { model.choose(found) } label: {
-                            HStack {
-                                Text(found.id).foregroundStyle(.primary)
-                                Spacer()
-                                if found.vision == true { Image(systemName: "eye").accessibilityLabel("Vision") }
-                                if found.id == model.model { Image(systemName: "checkmark").accessibilityLabel("Selected") }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Model")
-                } footer: {
-                    Text(model.isKnownModel
-                         ? "Vision support for this model comes from the provider's documentation."
-                         : "Turn on vision only if the provider says this model accepts images. Handwriting is sent as an image.")
-                }
-
-                Section {
-                    SecureField(ProviderCatalog.keyName(model.presetID), text: $model.keyInput)
-                        .textContentType(.password)
-                        .privacySensitive()
-                    HStack {
-                        Button("Save key") { model.saveKey() }
-                            .disabled(model.keyInput.trimmingCharacters(in: .whitespaces).isEmpty || model.effectiveBaseURL == nil)
-                        Spacer()
-                        if model.hasKey {
-                            Button("Remove key", role: .destructive) { model.removeKey() }
-                        }
-                    }
-                    .buttonStyle(.borderless)
-                    LabeledContent("Saved key", value: model.hasKey ? "On this iPad" : "None")
-                } header: {
-                    Text("Key")
-                } footer: {
-                    Text("The key stays in this iPad's Keychain and is used only for this provider and endpoint. Changing the endpoint needs the key again.")
-                }
-
-                Section {
-                    Button {
-                        model.testConnection()
-                    } label: {
-                        HStack {
-                            Text("Test connection")
-                            if model.isBusy { Spacer(); ProgressView() }
-                        }
-                    }
-                    .disabled(model.isBusy || !model.hasKey)
-                    if let status = model.status {
-                        Text(status).font(.callout).foregroundStyle(.secondary)
-                    }
-                } footer: {
-                    Text("Sends one short text message to the selected model.")
-                }
-
-                Section {
-                    Toggle("Ask when I pause writing", isOn: $autoAsk.enabled)
-                    Stepper(value: $autoAsk.delaySeconds, in: AutoAskSettings.delayRange, step: 0.5) {
-                        LabeledContent("Pause", value: "\(autoAsk.delaySeconds.formatted(.number.precision(.fractionLength(0...1)))) s")
-                    }
-                    .disabled(!autoAsk.enabled)
-                } header: {
-                    Text("Auto Ask")
-                } footer: {
-                    Text("After you stop writing for this long, Pencil Echo asks about the ink you just wrote and writes the answer beside it. The Ask AI button still works.")
-                }
-                .onChange(of: autoAsk) { _, settings in settings.save() }
-
-                Section("What is sent") {
-                    Text("When Ask AI runs, Pencil Echo sends an image of your selection (or the ink you just wrote, or the visible area) and your instruction to \(model.preset?.displayName ?? "the provider") at \(model.effectiveBaseURL?.host() ?? "the endpoint above"). Chat sends your selection or visible page plus up to 10 recent text turns. Earlier images are never resent. The provider's own terms apply to what you send.")
-                        .font(.callout)
-                }
+                providerSection
+                keySection
+                endpointSection
+                savedConnectionsSection
+                answersSection
+                appearanceSection
+                privacySection
+                aboutSection
             }
+            .formStyle(.grouped)
             .navigationTitle("AI Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { if let onDone { onDone() } else { dismiss() } } }
             }
+            .onChange(of: canvasSettings) { _, value in value.save() }
+            .onChange(of: autoAsk) { _, settings in settings.save() }
             .onDisappear { model.cancel() }
+        }
+    }
+
+    // MARK: - AI provider
+
+    private var providerSection: some View {
+        Section {
+            Picker("Provider", selection: Binding(get: { model.presetID }, set: { model.select($0) })) {
+                ForEach(ProviderCatalog.all) { Text($0.displayName).tag($0.id) }
+            }
+            TextField("Model ID", text: Binding(get: { model.model }, set: { model.setModel($0) }))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if let preset = model.preset, !preset.defaultModels.isEmpty {
+                Menu {
+                    ForEach(preset.defaultModels) { suggestion in
+                        Button { model.setModel(suggestion.id) } label: {
+                            Label(suggestion.id, systemImage: suggestion.capabilities.vision ? "eye" : "text.alignleft")
+                        }
+                    }
+                } label: {
+                    Label("Suggested models", systemImage: "list.bullet")
+                }
+            }
+            if model.preset?.authStyle == .bearer {
+                Button {
+                    model.fetchModels()
+                } label: {
+                    Label("Fetch models from provider", systemImage: "arrow.down.circle")
+                }
+                .disabled(model.isBusy || model.effectiveBaseURL == nil)
+            }
+            ForEach(model.discovered.prefix(200)) { found in
+                Button { model.choose(found) } label: {
+                    HStack {
+                        Text(found.id).foregroundStyle(.primary)
+                        Spacer()
+                        if found.vision == true { Image(systemName: "eye").accessibilityLabel("Vision") }
+                        if found.id == model.model { Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityLabel("Selected") }
+                    }
+                }
+            }
+            Toggle(isOn: Binding(get: { model.modelHasVision }, set: { model.setVision($0) })) {
+                Label("Reads images", systemImage: "eye")
+            }
+        } header: {
+            Text("AI provider")
+        } footer: {
+            Text(model.isKnownModel
+                 ? "Ask AI uses only this provider and never retries with another. Image support for this model comes from the provider's documentation."
+                 : "Ask AI uses only this provider and never retries with another. Turn on Reads images only if the provider says this model accepts images: handwriting is sent as an image.")
+        }
+    }
+
+    private var keySection: some View {
+        Section {
+            SecureField(ProviderCatalog.keyName(model.presetID), text: $model.keyInput)
+                .textContentType(.password)
+                .privacySensitive()
+            LabeledContent("Saved key", value: model.hasKey ? "On this iPad" : "None")
+            HStack {
+                Button("Save key") { model.saveKey() }
+                    .disabled(model.keyInput.trimmingCharacters(in: .whitespaces).isEmpty || model.effectiveBaseURL == nil)
+                Spacer()
+                if model.hasKey {
+                    Button("Remove key", role: .destructive) { model.removeKey() }
+                }
+            }
+            .buttonStyle(.borderless)
+            Button {
+                model.testConnection()
+            } label: {
+                HStack {
+                    Label("Test connection", systemImage: "bolt.horizontal")
+                    if model.isBusy { Spacer(); ProgressView() }
+                }
+            }
+            .disabled(model.isBusy || !model.hasKey)
+            if let status = model.status { statusLabel(status) }
+        } header: {
+            Text("API key")
+        } footer: {
+            Text("Keys stay in this iPad's Keychain, for this provider and endpoint only. Test connection sends one short text message to the model.")
+        }
+    }
+
+    /// The model's status line as symbol + text: connected, information, or a problem.
+    private func statusLabel(_ status: String) -> some View {
+        let lower = status.lowercased()
+        let symbol: String, color: Color
+        if lower.hasPrefix("connected") {
+            (symbol, color) = ("checkmark.circle.fill", .green)
+        } else if lower.hasPrefix("key saved") || lower.hasPrefix("key removed") || lower.hasPrefix("found") {
+            (symbol, color) = ("info.circle.fill", .secondary)
+        } else {
+            (symbol, color) = ("exclamationmark.triangle.fill", .orange)
+        }
+        return Label {
+            Text(status).foregroundStyle(.primary)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(color).symbolRenderingMode(.hierarchical)
+        }
+        .font(.callout)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var endpointSection: some View {
+        Section {
+            TextField(model.presetID == ProviderCatalog.customID ? "https://example.com/v1" : model.preset?.baseURL.absoluteString ?? "",
+                      text: Binding(get: { model.current.baseURLOverride ?? "" }, set: { model.setBaseURL($0) }))
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if model.effectiveBaseURL == nil {
+                Label {
+                    Text("Enter an HTTPS base URL, such as https://example.com/v1.").foregroundStyle(.primary)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                .font(.callout)
+            } else {
+                LabeledContent("Requests go to", value: model.effectiveBaseURL?.absoluteString ?? "")
+            }
+        } header: {
+            Text("Endpoint")
+        } footer: {
+            Text("Leave empty to use the provider's standard address. A new endpoint needs its key saved again.")
+        }
+    }
+
+    private var savedConnectionsSection: some View {
+        Section("Saved connections") {
+            ForEach(ProviderCatalog.all.filter { model.settings.providers[$0.id] != nil || $0.id == model.presetID }) { preset in
+                Button { model.select(preset.id) } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(preset.displayName).foregroundStyle(.primary)
+                            let saved = model.settings.settings(for: preset.id).model
+                            Text(saved.isEmpty ? "No model" : saved).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if preset.id == model.presetID {
+                            Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
+                        }
+                    }
+                }
+                .accessibilityValue(preset.id == model.presetID ? "Selected" : "")
+                .accessibilityHint("Switch to this saved provider and model")
+            }
+        }
+    }
+
+    // MARK: - Answers, appearance, privacy, about
+
+    private var answersSection: some View {
+        Section {
+            Toggle("Answer automatically when I pause", isOn: $autoAsk.enabled)
+            Stepper(value: $autoAsk.delaySeconds, in: AutoAskSettings.delayRange, step: 0.5) {
+                LabeledContent("Pause before answering", value: "\(autoAsk.delaySeconds.formatted(.number.precision(.fractionLength(0...1)))) s")
+            }
+            .disabled(!autoAsk.enabled)
+        } header: {
+            Text("Answers")
+        } footer: {
+            Text("Pencil Echo asks the AI after you stop writing for this long, and writes the answer beside your ink. Ask AI still works any time.")
+        }
+    }
+
+    private var appearanceSection: some View {
+        Section("Appearance") {
+            Picker("AI font", selection: $canvasSettings.appearance.font) {
+                ForEach(AIAnswerAppearance.Font.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+            }
+            Toggle("Thinking indicator", isOn: $canvasSettings.thinkingIndicator)
+        }
+    }
+
+    private var privacySection: some View {
+        Section {
+            Label("Only the part of the page you ask about is sent", systemImage: "lock")
+        } header: {
+            Text("Privacy")
+        } footer: {
+            Text("When Ask AI runs, Pencil Echo sends an image of your selection (or the ink you just wrote, or the visible area) and your instruction to \(model.preset?.displayName ?? "the provider") at \(model.effectiveBaseURL?.host() ?? "the endpoint above"). Chat sends your selection or visible page plus up to 10 recent text turns. Earlier images are never resent. The provider's own terms apply to what you send.")
+        }
+    }
+
+    private var aboutSection: some View {
+        Section("About") {
+            LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+            NavigationLink("Third-party notices") {
+                ScrollView { Text(Self.notices).font(.footnote).padding() }.navigationTitle("Third-party notices")
+            }
         }
     }
 }
