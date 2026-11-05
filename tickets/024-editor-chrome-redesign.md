@@ -1,6 +1,6 @@
 # 024 — Editor chrome: one command bar, inspectors, clear AI controls
 
-Milestone: UI/UX upgrade · Status: Open · Owner: **Claude (senior)** · Depends on: nothing (works on `main` as of `a9c8a0c`) · Reviewer: owner
+Milestone: UI/UX upgrade · Status: Resolved on simulator (2026-11-05); owner A16 check pending · Owner: **Claude (senior)** · Depends on: nothing (works on `main` as of `a9c8a0c`) · Reviewer: owner
 
 Follow [the UI style guide](../docs/design/ui-style-guide.md). This is the highest-risk UI ticket: it touches the UIKit editor, PencilKit's tool picker and every editor control.
 
@@ -82,3 +82,16 @@ At compact width the system overflow menu takes the lowest-priority items (View,
 ## Handoff
 
 Claude implements this one. Branch `ui/024-editor-chrome` in its own worktree. Merges **last**, after 025–027, rebasing onto them (the only shared files are `project.pbxproj` and `LibraryUITests.swift`, handled as above).
+
+## Implementation notes (2026-11-05)
+
+- **One bar:** the UIKit `makeToolbar` row and the SwiftUI `aiToolbar` are gone. The navigation bar holds back (identifier `Done`, label "Library"), the title with a title menu (Rename…, Export page as PNG, New canvas, New notebook), a subtitle (save state · AI status · page n of m), and three groups: Select / Insert / View, Ask AI (`.glassProminent`, becomes Stop while pending) / Answer mode, then Chat / Claude Code / Settings. Undo and redo stay in Apple's tool picker and on ⌘Z / ⌘⇧Z.
+- **Editor state:** `EditorChromeState` (`application/App/Editor/EditorSelectionBar.swift`) is written by `DocumentEditorController` (select mode, selection rect, pages, page style, notices) and read by the shell. The controller's editing actions are now internal methods.
+- **Selection bar:** a `GlassEffectContainer` above the selection (or below it when there's no room), kept on screen and above the tool picker; Edit, Ask AI, Delete. It's hidden during drag. ⌫ deletes the selection.
+- **Inspectors:** Chat and Settings use `.inspector`, attached **outside** the editor's `NavigationStack`. Inside it, the panels' own titles and Done buttons merged into the editor's bar (the editor title showed "AI Settings"). The panel content is padded above Apple's floating tool picker so the chat field can be tapped.
+- **Drafts:** a glass capsule above the tool picker ("N drafts on the page", Discard all, Accept all) while chat is closed.
+- **Cards:** review and failure cards are glass cards at the top; notices (former UIKit banner) are a dismissible glass card that leaves after 5 s.
+- **Full screen:** hides the bar; a glass exit button top-trailing; ⌘⇧F toggles, Esc exits or stops a request.
+- **Claude Code:** status capsule with a green/orange dot when sharing; opens `MCPShareView` in a popover. `MCPShareBanner` is no longer placed.
+- **Tests:** four editor journeys moved to `EditorUITests.swift` and rewritten, plus two new ones (one command bar, selection bar). Findings: system menu items don't carry SwiftUI identifiers (find by label); toggles keep a menu open on iPadOS 27; with an inspector open in portrait the bar overflows, so Chat sits in the overflow menu (the panel has Close).
+

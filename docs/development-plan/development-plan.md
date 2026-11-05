@@ -52,10 +52,10 @@ Ticket files live in `tickets/`. Owner decisions: signing with a free Apple ID P
 | [021 Agent chat panel](../../tickets/021-agent-chat-panel.md) | PE-003 | Codex (implemented after editor shell; native checks/builds verified; simulator runtime and owner live gates open) | 010, 016, 017, 020 |
 | [022 Library navigation sidebar](../../tickets/022-library-navigation-sidebar.md) | PE-004 | OpenCode (open) | 009 |
 | [023 LAN MCP for Claude Code](../../tickets/023-lan-mcp-for-claude-code.md) | PE-005 (moved earlier) | Claude (simulator end-to-end verified; owner A16 + Claude Code pending) | 017, 018, 019, 021 |
-| [024 Editor chrome redesign](../../tickets/024-editor-chrome-redesign.md) | UI/UX | Claude (senior; open) | — |
-| [025 Library navigation polish](../../tickets/025-library-navigation-polish.md) | UI/UX | Codex (mid; open) | — |
-| [026 Settings and Chat panels](../../tickets/026-settings-and-chat-panels.md) | UI/UX | Cursor Grok (junior; open) | — |
-| [027 Claude Code share popover](../../tickets/027-claude-code-share-popover.md) | UI/UX | OpenCode (intern; open) | — |
+| [024 Editor chrome redesign](../../tickets/024-editor-chrome-redesign.md) | UI/UX | Claude (senior; resolved on simulator, A16 pending) | — |
+| [025 Library navigation polish](../../tickets/025-library-navigation-polish.md) | UI/UX | Codex (mid; merged after senior review fixes) | — |
+| [026 Settings and Chat panels](../../tickets/026-settings-and-chat-panels.md) | UI/UX | Claude (taken over from Cursor Grok; merged) | — |
+| [027 Claude Code share popover](../../tickets/027-claude-code-share-popover.md) | UI/UX | OpenCode, finished by Claude (merged) | — |
 
 
 ### Agent assignments for 017–022 (2026-11-04)

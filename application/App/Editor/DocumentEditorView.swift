@@ -69,10 +69,7 @@ struct DocumentEditorScreen: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationBarTitleDisplayMode(.inline)
-        }
+        content
         .task { await load() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { saveInBackground() }
@@ -94,14 +91,17 @@ struct DocumentEditorScreen: View {
     private var content: some View {
         switch phase {
         case .loading:
-            ProgressView("Opening…")
+            NavigationStack { ProgressView("Opening…") }
         case .ready(let session, let assetsURL):
+            // The editor owns its NavigationStack so its inspector sits outside it (ticket 024).
             AskAIEditorContainer(session: session, assetsURL: assetsURL, onClose: { Task { await close() } }, onCreate: { type in Task { await create(type) } })
                 .environment(\.horizontalSizeClass, effectiveSizeClass)
                 .id(session.manifest.id)
                 .ignoresSafeArea(.container, edges: .bottom)
         case .failed(let message):
-            ContentUnavailableView("Can't open this document", systemImage: "exclamationmark.triangle", description: Text(message))
+            NavigationStack {
+                ContentUnavailableView("Can't open this document", systemImage: "exclamationmark.triangle", description: Text(message))
+            }
         }
     }
 

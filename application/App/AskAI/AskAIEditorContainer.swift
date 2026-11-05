@@ -71,14 +71,22 @@ struct AskAIEditorContainer: View {
     }
 
     var body: some View {
-        editor
-            .navigationTitle(session.manifest.title)
-            .navigationSubtitle(subtitle)
-            .toolbarTitleMenu { titleMenu }
-            .toolbar(fullscreen ? .hidden : .visible, for: .navigationBar)
-            .toolbar { bar }
+        // The inspector is attached outside the NavigationStack: inside it, the panels'
+        // own titles and Done buttons would merge into the editor's bar.
+        NavigationStack {
+            editor
+                .navigationTitle(session.manifest.title)
+                .navigationSubtitle(subtitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarTitleMenu { titleMenu }
+                .toolbar(fullscreen ? .hidden : .visible, for: .navigationBar)
+                .toolbar { bar }
+        }
             .inspector(isPresented: inspectorShown) {
-                inspectorContent.inspectorColumnWidth(min: 320, ideal: 360, max: 400)
+                inspectorContent
+                    // Keep the panel's bottom bar above Apple's floating tool picker.
+                    .padding(.bottom, source.pickerAtTop ? 0 : source.pickerClearance)
+                    .inspectorColumnWidth(min: 320, ideal: 360, max: 400)
             }
             .sheet(item: $export) { item in PNGShareSheet(data: item.data) }
             .alert("Rename document", isPresented: $rename) {
@@ -375,8 +383,8 @@ struct AskAIEditorContainer: View {
             Label(autoAsk.enabled ? "Auto" : "On request", systemImage: autoAsk.enabled ? "timer" : "hand.tap")
                 .labelStyle(.titleAndIcon)
         }
-        .accessibilityLabel("Answer mode")
-        .accessibilityValue(autoAsk.enabled ? "Automatic after \(autoAsk.delaySeconds.formatted()) seconds" : "Only when you ask")
+        // A toolbar Menu doesn't expose accessibilityValue, so the mode is in the label.
+        .accessibilityLabel(autoAsk.enabled ? "Answer mode, automatic after \(autoAsk.delaySeconds.formatted()) seconds" : "Answer mode, only when you ask")
         .accessibilityIdentifier("editor-answer-menu")
     }
 
@@ -419,11 +427,11 @@ struct AskAIEditorContainer: View {
     /// Esc stops a request or leaves full screen; ⌘⇧F enters full screen.
     private var shortcuts: some View {
         Group {
-            Button("Stop or exit") {
+            Button("Escape shortcut") {
                 if ask.isPending || chat.isPending { ask.cancel(); chat.cancel() } else if fullscreen { setFullscreen(false) }
             }
             .keyboardShortcut(.escape, modifiers: [])
-            Button("Full screen") { setFullscreen(!fullscreen) }
+            Button("Full screen shortcut") { setFullscreen(!fullscreen) }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
         }
         .opacity(0)
@@ -442,7 +450,8 @@ struct AskAIEditorContainer: View {
     @ViewBuilder private var inspectorContent: some View {
         switch inspector {
         case .chat: AgentChatView(controller: chat, onClose: { inspector = nil })
-        case .settings, nil: AISettingsView(onDone: { inspector = nil })
+        case .settings: AISettingsView(onDone: { inspector = nil })
+        case nil: EmptyView()
         }
     }
 
