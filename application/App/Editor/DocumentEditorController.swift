@@ -35,8 +35,9 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
     private let selectionShape = CAShapeLayer()
     private let draftOutlines = CAShapeLayer()
     private let handleShape = CAShapeLayer()
-    private let banner = UILabel()
-    private let pageLabel = UILabel()
+    /// State the SwiftUI bar and selection bar read (ticket 024). Set before the view loads.
+    var chrome: EditorChromeState?
+    private var lastPersistentNotice: String?
     private let thinking = UIActivityIndicatorView(style: .medium)
     private var thinkingRegion: CGRect?
     func setThinkingRegion(_ region: CGRect?) {
@@ -44,8 +45,6 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         if region == nil { thinking.stopAnimating() } else { thinking.startAnimating() }
         synchronizeLayers()
     }
-    private let saveLabel = UILabel()
-    private var editorToolbar: UIView?
     private(set) var handMode = false
     func setHandMode(_ enabled: Bool) {
         guard !toolInUse else { return }
@@ -56,7 +55,6 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         selectTap.isEnabled = selectMode && !enabled
         canvas.panGestureRecognizer.allowedTouchTypes = enabled ? [NSNumber(value: UITouch.TouchType.direct.rawValue), NSNumber(value: UITouch.TouchType.pencil.rawValue)] : [NSNumber(value: UITouch.TouchType.direct.rawValue)]
     }
-    func setFullscreen(_ enabled: Bool) { editorToolbar?.isHidden = enabled }
     func exportCurrentPage() -> Data {
         let index = currentPageIndex
         let page = session.pages[index], frame = session.layout.pageRect(index)
@@ -110,7 +108,6 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
     var onToolBegan: (() -> Void)?
     var onToolEnded: ((_ inked: Bool) -> Void)?
     private var objectViews: [UUID: UIView] = [:]
-    private var buttons: [String: UIButton] = [:]
     private(set) var selectMode = false
     private var toolInUse = false
     private var inkChangedDuringTool = false
@@ -143,7 +140,9 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         let redo = UIKeyCommand(title: "Redo", action: #selector(redoAction), input: "z", modifierFlags: [.command, .shift])
         undo.wantsPriorityOverSystemBehavior = true
         redo.wantsPriorityOverSystemBehavior = true
-        return [undo, redo]
+        guard hasSelection else { return [undo, redo] }
+        let delete = UIKeyCommand(title: "Delete Selection", action: #selector(deleteSelectionCommand), input: UIKeyCommand.inputDelete)
+        return [undo, redo, delete]
     }
 
     // MARK: - Setup
@@ -197,29 +196,14 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         viewport.addGestureRecognizer(doubleTap)
         selectTap.require(toFail: doubleTap)
 
-        banner.numberOfLines = 0
-        banner.font = .preferredFont(forTextStyle: .footnote)
-        banner.adjustsFontForContentSizeCategory = true
-        banner.textColor = .secondaryLabel
-        banner.isHidden = true
-        for label in [pageLabel, saveLabel] {
-            label.font = .preferredFont(forTextStyle: .footnote)
-            label.adjustsFontForContentSizeCategory = true
-            label.textColor = .secondaryLabel
-        }
-
-        let toolbar = makeToolbar()
-        editorToolbar = toolbar
-        let stack = UIStackView(arrangedSubviews: [toolbar, banner, viewport])
-        stack.axis = .vertical
-        stack.spacing = 4
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        // One command bar lives in SwiftUI (ticket 024); the viewport fills the safe area.
+        viewport.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(viewport)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            viewport.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            viewport.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            viewport.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            viewport.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
         session.onApply = { [weak self] in self?.sessionDidApply() }
@@ -273,79 +257,13 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         synchronizeLayers()
     }
 
-    private func makeToolbar() -> UIView {
-        let row = UIStackView()
-        row.spacing = 4
-        row.alignment = .center
-        func add(_ key: String, _ symbol: String, _ label: String, action: @escaping () -> Void) {
-            var configuration = UIButton.Configuration.plain()
-            configuration.image = UIImage(systemName: symbol)
-            if configuration.image == nil { configuration.title = label }
-            let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in action() })
-            button.accessibilityLabel = label
-            button.toolTip = label
-            button.isPointerInteractionEnabled = true
-            buttons[key] = button
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            row.addArrangedSubview(button)
-        }
-        add("undo", "arrow.uturn.backward", "Undo") { [weak self] in self?.undoAction() }
-        add("redo", "arrow.uturn.forward", "Redo") { [weak self] in self?.redoAction() }
-        add("select", "lasso", "Select ink and objects") { [weak self] in self?.toggleSelectMode() }
-        add("text", "textformat", "Add text") { [weak self] in self?.addText() }
-        add("rich", "function", "Add Markdown or formula") {}
-        buttons["rich"]?.menu = UIMenu(children: [
-            UIAction(title: "Markdown") { [weak self] _ in self?.addText(type: .markdown) },
-            UIAction(title: "Formula") { [weak self] _ in self?.addText(type: .latex) },
-            UIAction(title: "Graph") { [weak self] _ in self?.addText(type: .plot) }
-        ])
-        buttons["rich"]?.showsMenuAsPrimaryAction = true
-        add("edit", "character.cursor.ibeam", "Edit text") { [weak self] in self?.editSelectedText() }
-        add("delete", "trash", "Delete selection") { [weak self] in self?.deleteSelection() }
-        add("background", "square.grid.3x3", "Page background") {}
-        buttons["background"]?.menu = backgroundMenu()
-        buttons["background"]?.showsMenuAsPrimaryAction = true
-        if session.type == .notebook {
-            add("addPage", "plus.rectangle.on.rectangle", "Add page after this page") { [weak self] in self?.addPage() }
-            add("deletePage", "minus.rectangle", "Delete this page") { [weak self] in self?.confirmDeletePage() }
-            row.addArrangedSubview(pageLabel)
-        }
-        let spacer = UIView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        row.addArrangedSubview(spacer)
-        // Save state lives in the shell top bar.
-        row.isLayoutMarginsRelativeArrangement = true
-        row.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
-        row.heightAnchor.constraint(equalToConstant: 44).isActive = true
-        let scroll = UIScrollView()
-        scroll.showsHorizontalScrollIndicator = false
-        row.translatesAutoresizingMaskIntoConstraints = false
-        scroll.addSubview(row)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
-            row.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
-            row.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
-            row.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
-            row.widthAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor),
-            scroll.heightAnchor.constraint(equalToConstant: 44)
-        ])
-        return scroll
-    }
+    /// The page in view's background style; the View menu shows it checked.
+    var currentPageStyle: BackgroundStyle { session.pages[currentPageIndex].background.style }
 
-    private func backgroundMenu() -> UIMenu {
-        let styles: [(BackgroundStyle, String)] = [(.blank, "Blank"), (.lined, "Lined"), (.dotted, "Dotted"), (.grid, "Grid")]
-        return UIMenu(title: session.type == .notebook ? "This page" : "Canvas", children: [UIDeferredMenuElement.uncached { [weak self] done in
-            guard let self else { return done([]) }
-            let current = session.pages[currentPageIndex].background.style
-            done(styles.map { style, title in
-                UIAction(title: title, state: style == current ? .on : .off) { [weak self] _ in
-                    guard let self else { return }
-                    session.setBackground(style, page: currentPageIndex)
-                }
-            })
-        }])
+    func setPageStyle(_ style: BackgroundStyle) {
+        guard !toolInUse, !session.isReadOnly else { return }
+        session.setBackground(style, page: currentPageIndex)
+        refreshStatus()
     }
 
     // MARK: - Layout and synchronisation
@@ -488,20 +406,18 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         refreshStatus()
     }
 
-    private func toggleSelectMode() {
+    func toggleSelectMode() {
         guard !toolInUse else { return }
         selectMode.toggle()
         lassoPan.isEnabled = selectMode
         selectTap.isEnabled = selectMode
         canvas.drawingGestureRecognizer.isEnabled = !selectMode && !handMode
         canvas.panGestureRecognizer.minimumNumberOfTouches = selectMode ? 2 : 1
-        buttons["select"]?.isSelected = selectMode
-        buttons["select"]?.accessibilityValue = selectMode ? "On" : "Off"
         clearSelection()
         refreshStatus()
     }
 
-    private func addText(type: ObjectType = .text) {
+    func addText(type: ObjectType = .text) {
         guard !toolInUse, let id = session.addTextObject(at: viewportCenter, source: type == .markdown ? "# Answer\n\nWrite **Markdown** with $x^2$." : type == .latex ? #"\frac{a}{b}"# : type == .plot ? "y = x^2\nx: -5 .. 5" : "Text", type: type) else {
             if session.objects.count >= DocumentLimits.maxObjects { showBanner("This document has the maximum number of objects.") }
             return
@@ -513,10 +429,10 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         editText(of: id)
     }
 
-    private func editSelectedText() {
+    func editSelectedText() {
         let candidates = session.objects.filter { selectedObjects.contains($0.id) && $0.type != .image }
         guard let object = candidates.first else {
-            showBanner("Select a text object first: turn on Select, then tap the object.")
+            showBanner("Select a text object first: turn on Select, then tap it.")
             return
         }
         editText(of: object.id)
@@ -533,13 +449,17 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         present(navigation, animated: true)
     }
 
-    private func deleteSelection() {
+    @objc private func deleteSelectionCommand() { deleteSelection() }
+
+    var hasSelection: Bool { !selectedStrokes.isEmpty || !selectedObjects.isEmpty }
+
+    func deleteSelection() {
         guard !toolInUse, !selectedStrokes.isEmpty || !selectedObjects.isEmpty else { return }
         session.deleteSelection(strokes: selectedStrokes, objectIds: selectedObjects)
         clearSelection()
     }
 
-    private func addPage() {
+    func addPage() {
         guard !toolInUse, let index = session.addPage(after: currentPageIndex) else {
             if session.pages.count >= DocumentLimits.maxNotebookPages { showBanner("A notebook can have up to \(DocumentLimits.maxNotebookPages) pages.") }
             return
@@ -547,7 +467,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
         scrollToPage(index)
     }
 
-    private func confirmDeletePage() {
+    func confirmDeletePage() {
         guard !toolInUse, session.pages.count > 1 else { return showBanner("A notebook keeps at least one page.") }
         let index = currentPageIndex
         let alert = UIAlertController(title: "Delete page \(index + 1)?",
@@ -567,9 +487,9 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
                                         y: min(maxY, (rect.minY - EditorLayout.pageGap / 2) * canvas.zoomScale)), animated: true)
     }
 
+    /// Short notices appear as a glass card in the SwiftUI shell (ticket 024).
     private func showBanner(_ text: String?) {
-        banner.text = text.map { "  " + $0 }
-        banner.isHidden = text == nil
+        chrome?.notice = text
         if let text { UIAccessibility.post(notification: .announcement, argument: text) }
     }
 
@@ -763,6 +683,7 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
 
     private func redrawSelection() {
         onSelectionChanged?(askAISelection)
+        publishSelection()
         let zoom = canvas.zoomScale, offset = canvas.contentOffset
         handleShape.path = nil
         let points: [CGPoint]
@@ -785,30 +706,48 @@ final class DocumentEditorController: UIViewController, PKCanvasViewDelegate, UI
 
     // MARK: - Status
 
+    /// The selection's bounds in this controller's view, for the floating selection bar.
+    private func publishSelection() {
+        guard let chrome else { return }
+        let dragging = drag != nil || lassoPoints.count > 1
+        var rect: CGRect?
+        if !dragging, let bounds = selectionBounds {
+            let topLeft = EditorGeometry.viewport(CGPoint(x: bounds.minX, y: bounds.minY), zoom: canvas.zoomScale, offset: canvas.contentOffset)
+            let bottomRight = EditorGeometry.viewport(CGPoint(x: bounds.maxX, y: bounds.maxY), zoom: canvas.zoomScale, offset: canvas.contentOffset)
+            rect = viewport.convert(CGRect(x: topLeft.x, y: topLeft.y, width: bottomRight.x - topLeft.x, height: bottomRight.y - topLeft.y), to: view)
+        }
+        if chrome.selectionRect != rect { chrome.selectionRect = rect }
+        if chrome.viewportFrame != viewport.frame { chrome.viewportFrame = viewport.frame }
+    }
+
     private func refreshPageLabel() {
-        guard session.type == .notebook else { return }
-        pageLabel.text = "Page \(currentPageIndex + 1) of \(session.pages.count)"
+        guard let chrome else { return }
+        let index = currentPageIndex
+        if chrome.pageIndex != index { chrome.pageIndex = index }
+        if chrome.pageCount != session.pages.count { chrome.pageCount = session.pages.count }
+        let style = session.pages[index].background.style
+        if chrome.pageStyle != style { chrome.pageStyle = style }
     }
 
     private func refreshStatus() {
         let editable = !session.isReadOnly && !toolInUse
-        buttons["undo"]?.isEnabled = editable && session.manager.canUndo
-        buttons["redo"]?.isEnabled = editable && session.manager.canRedo
-        let hasSelection = !selectedStrokes.isEmpty || !selectedObjects.isEmpty
-        buttons["delete"]?.isEnabled = editable && hasSelection
-        buttons["edit"]?.isEnabled = editable && session.objects.contains { selectedObjects.contains($0.id) && $0.type != .image }
-        for key in ["select", "text", "rich", "background", "addPage"] { buttons[key]?.isEnabled = editable }
-        buttons["deletePage"]?.isEnabled = editable && session.pages.count > 1
+        if let chrome {
+            chrome.selectMode = selectMode
+            chrome.hasSelection = hasSelection
+            chrome.canEditSelection = editable && session.objects.contains { selectedObjects.contains($0.id) && $0.type != .image }
+            chrome.isEditable = editable
+        }
         refreshPageLabel()
+        let notice: String?
         switch session.saveState {
-        case .saved: saveLabel.text = "Saved"
-        case .pending, .saving: saveLabel.text = "Saving…"
-        case .failed(let reason):
-            saveLabel.text = "Not saved"
-            showBanner(reason)
-        case .readOnly(let reason):
-            saveLabel.text = "Read-only"
-            showBanner(reason)
+        case .failed(let reason): notice = reason
+        case .readOnly(let reason): notice = reason
+        default: notice = nil
+        }
+        // Show a lasting problem once, not on every refresh.
+        if notice != lastPersistentNotice {
+            lastPersistentNotice = notice
+            if let notice { showBanner(notice) }
         }
     }
 }
