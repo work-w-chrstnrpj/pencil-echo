@@ -35,11 +35,14 @@ final class LibraryUITests: XCTestCase {
         } else { new.tap() }
     }
 
+    /// Switches grid ↔ list through View options. Menu items are system menu items,
+    /// which don't carry SwiftUI identifiers, so they're found by label.
     private func libraryToggleLayout(_ app: XCUIApplication) {
-        app.buttons["library-sort"].tap()
-        let alternate = app.buttons["library-layout-toggle"].firstMatch
-        XCTAssertTrue(alternate.waitForExistence(timeout: 5))
-        alternate.tap()
+        let showingList = app.descendants(matching: .any)["library-list"].firstMatch.exists
+        let target = app.buttons[showingList ? "Grid" : "List"].firstMatch
+        if !target.exists { app.buttons["library-sort"].tap() }
+        XCTAssertTrue(target.waitForExistence(timeout: 5))
+        target.tap()
     }
 
     private func libraryCapture(_ app: XCUIApplication, _ name: String) {
@@ -188,6 +191,12 @@ final class LibraryUITests: XCTestCase {
         starred.lifetime = .keepAlways
         add(starred)
 
+        // Sort and layout first: while search is active, iPadOS hides the toolbar's View options.
+        app.buttons["library-sort"].tap()
+        app.buttons["Title"].firstMatch.tap()
+        libraryToggleLayout(app)
+        XCTAssertTrue(app.descendants(matching: .any)["library-list"].firstMatch.waitForExistence(timeout: 5))
+
         // Search filters the selected section as the query is typed.
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
@@ -196,17 +205,13 @@ final class LibraryUITests: XCTestCase {
         XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
         search.typeText(" missing")
         XCTAssertTrue(card(app, title: "Untitled Canvas").waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["No Results"].waitForExistence(timeout: 5))
+        // iPadOS shows "No Results for “…”".
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "No Results")).firstMatch.waitForExistence(timeout: 5))
         libraryCapture(app, "search-no-results")
         let typed = search.value as? String ?? ""
         search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
         XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
-
-        // Persist a sort choice through the combined menu as well.
-        app.buttons["library-sort"].tap()
-        app.buttons["Title"].firstMatch.tap()
-        // Switch to the list layout and keep the same row identifier.
-        libraryToggleLayout(app)
+        // The list layout chosen before searching is still shown.
         let list = app.descendants(matching: .any)["library-list"].firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 5))
         XCTAssertTrue(card(app, title: "Untitled Canvas").exists)

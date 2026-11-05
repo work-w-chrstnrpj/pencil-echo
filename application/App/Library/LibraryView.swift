@@ -266,6 +266,8 @@ struct LibraryView: View {
         } primaryAction: {
             create(.canvas)
         }
+        // A Menu takes the button style only with the button menu style.
+        .menuStyle(.button)
         .buttonStyle(.glassProminent)
         .disabled(model.isWorking)
         .accessibilityIdentifier("library-new")

@@ -77,3 +77,19 @@ Claude review remains required before merge. Pointer hover, VoiceOver speech and
 - Both hosted and UI test-target builds pass; 14 native helper assertions pass. Runtime test acceptance is **not complete**: zero UI passes, one runner startup error, full hosted execution interrupted before tests.
 - The five requested screenshots and their visual inspection remain blocked before app launch. The three UI journeys already contain the named capture points for a future run.
 - Owner VoiceOver, pointer and hardware-keyboard checks and Claude review remain open. No merge, push or owner-device installation was performed.
+
+## Senior review and verification (Claude, 2026-11-05)
+
+Code review: scope respected (HomeView, LibraryView, LibraryModel helpers and the three library journeys only; no project file). Debug menu removed; View options + New; sidebar counts; page-shaped cards; relative dates; context menu with preview; list swipe actions.
+
+Fixes made during review:
+
+- **New wasn't prominent:** `.buttonStyle(.glassProminent)` doesn't apply to a `Menu` by itself; added `.menuStyle(.button)`.
+- **Favorites journey:** the search empty state is "No Results for “…”" on iPadOS 27, so the assertion matches the prefix. While search is active iPadOS hides the toolbar's View options, so sort and layout now run before the search. Menu items are system menu items without SwiftUI identifiers, so the layout helper finds Grid/List by label (`library-layout-toggle` was never reachable).
+
+Results on the iPad (A16) simulator:
+
+- Full unit suite: **✔ Test run with 258 tests in 26 suites passed.**
+- Library UI journeys: `testCreateRenameReopenRelaunchAndConfirmedDelete` ✔, `testDamagedPackageAndAccessibilityTextSize` ✔, `testFavoriteSearchAndListLayoutSurviveRelaunch` ✔.
+- The four editor journeys still in `LibraryUITests.swift` on this branch fail (two because the sidebar row is now also named "Settings"). Ticket 024 moves and rewrites them with unique identifiers.
+- Screenshots in `tests/evidence/025/` (grid, list, empty Favorites, search no results, dark mode, large text + damaged, toolbar and counts). The journeys force landscape and XCUI captures those rotated and cropped at the top edge; they were rotated upright, and `025-toolbar-and-counts.png` is a direct simulator capture showing the toolbar.
