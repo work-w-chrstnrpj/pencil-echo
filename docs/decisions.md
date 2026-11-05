@@ -23,6 +23,7 @@ Updated: 2026-11-03 (Asia/Manila)
 - App identity (owner, 2026-11-03): bundle ID `com.chrixcrusher.pencilecho`; deployment target iPadOS 27.0; device family iPad only.
 - Upstream reuse (owner override, 2026-11-03): code, prompts, schemas and assets in `inspiration/` may be copied or ported to Swift for this private experiment. Record provenance (upstream path + commit) in copied files. AGPL-3.0 and trademark obligations apply again if the project or a build is ever shared or published.
 - Chat agent and opt-in, paired LAN MCP access while app is active; selected documents only. Candidate clients: Codex, Claude Code, Cursor; owner uses all three.
+  - 2026-11-05: moved earlier as ticket 023 so the owner's Claude subscription can be used through Claude Code (Anthropic's product) instead of an API key. Transport: Mac stdio bridge + TLS 1.2 PSK over the LAN with Bonjour discovery. Claude Code is tested first; Codex and Cursor need separate evidence.
 - Widgets/quizzes/simulations later; 3D gated on A16 prototype. Offline widget operation by default; no API keys or unrestricted document access; internet permission scoped separately.
 - Offline drawing/edit/search/export; AI connectivity errors preserve request intent and offer manual retry.
 - Portrait/landscape, supported multitasking, multiple windows, keyboard/trackpad, VoiceOver, Dynamic Type. No document locking requirement.

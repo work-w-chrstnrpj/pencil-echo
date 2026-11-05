@@ -90,17 +90,7 @@ final class AgentChatController {
         }
         guard !session.isReadOnly,
               var next = AnswerApplier.apply(operations, to: session.snapshot, layout: session.layout, capture: capture, date: Date()) else { throw AIError.invalidOutput }
-        let originalIds = Set(session.objects.map(\.id))
-        for index in next.objects.indices where !originalIds.contains(next.objects[index].id) { next.objects[index].isDraft = true }
-        if next.drawing.strokes.count > session.drawing.strokes.count {
-            let earliest = next.drawing.strokes.map { $0.path.creationDate.timeIntervalSince1970 }.min() ?? 0
-            let marker = Date(timeIntervalSince1970: min(0, earliest) - 1)
-            for i in session.drawing.strokes.count..<next.drawing.strokes.count {
-                let stroke = next.drawing.strokes[i]
-                next.drawing.strokes[i] = PKStroke(ink: stroke.ink, path: PKStrokePath(controlPoints: Array(stroke.path), creationDate: marker), transform: stroke.transform, mask: stroke.mask)
-            }
-            next.draftInk.append(DraftInkBatch(requestId: capture.context.requestId, strokeDate: marker))
-        }
+        DraftMarker.mark(&next, comparedTo: session.snapshot, requestId: capture.context.requestId)
         let root = try JSONSerialization.jsonObject(with: raw) as? [String: Any]
         let message = (root?["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             ?? operations.compactMap { if case .addObject(_, let source, _, _) = $0 { return source }; return nil }.joined(separator: "\n\n")

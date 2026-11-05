@@ -249,12 +249,12 @@ struct AgentChatHistory: Codable, Equatable, Sendable {
     var isValid: Bool {
         messages.count <= Self.maxTurns * 2 && messages.count.isMultiple(of: 2) && messages.enumerated().allSatisfy {
             $0.element.text.utf8.count <= DocumentLimits.maxMessageBytes && $0.element.role == ($0.offset.isMultiple(of: 2) ? .user : .assistant)
-        } && draftInk.count <= DocumentLimits.maxObjects && draftInk.allSatisfy { $0.strokeDate.timeIntervalSince1970 < 0 }
+        } && draftInk.count <= DocumentLimits.maxObjects && draftInk.allSatisfy { $0.strokeDate.timeIntervalSince1970 < 86_400 && $0.strokeDate.timeIntervalSince1970 != 0 }
     }
 }
 
 /// PencilKit preserves path.creationDate across serialization and transforms.
-/// Draft strokes use a unique pre-epoch marker, so Auto Ask never treats them as new user ink.
+/// Draft strokes use a unique date in the first day of 1970 (ticket 023: PencilKit hides pre-1970 strokes), so Auto Ask never treats them as new user ink.
 struct DraftInkBatch: Codable, Equatable, Sendable {
     var requestId: UUID
     var strokeDate: Date

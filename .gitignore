@@ -57,3 +57,7 @@ xcuserdata/
 
 # Upstream reference clone (separate git repository; never edited, see AGENTS.md)
 inspiration/
+
+# Swift package build output (tools/mcp-bridge)
+.build/
+.swiftpm/

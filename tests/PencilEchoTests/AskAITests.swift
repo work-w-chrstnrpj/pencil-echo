@@ -381,9 +381,10 @@ struct AutoAskTests {
 
     let page = Page(id: UUID(), size: PageSize(width: 2_000, height: 2_000), background: .blank)
     let viewport = CGRect(x: 0, y: 0, width: 1_000, height: 800)
-    let old = Date(timeIntervalSince1970: 100)
+    // User ink is dated now; dates in the first day of 1970 are AI or draft ink (ticket 023).
+    let old = Date(timeIntervalSince1970: 1_800_000_100)
     /// "2+2=" written after the document opened.
-    var problem: PKStroke { Self.stroke([CGPoint(x: 600, y: 500), CGPoint(x: 700, y: 530)], at: Date(timeIntervalSince1970: 200)) }
+    var problem: PKStroke { Self.stroke([CGPoint(x: 600, y: 500), CGPoint(x: 700, y: 530)], at: Date(timeIntervalSince1970: 1_800_000_200)) }
 
     func document() -> FakeAskDocument {
         FakeAskDocument(type: .canvas, pages: [page],
@@ -665,16 +666,16 @@ struct VisualAnswerTests {
 struct ContextCaptureTests {
     let page = Page(id: UUID(), size: PageSize(width: 2_000, height: 2_000), background: .blank)
     let pageRect = CGRect(x: 0, y: 0, width: 2_000, height: 2_000)
-    let opened = Date(timeIntervalSince1970: 100)
+    let opened = Date(timeIntervalSince1970: 1_800_000_100)
     /// A maze drawn after the document opened: an outer box and one inner wall.
     var maze: [PKStroke] {
-        let date = Date(timeIntervalSince1970: 200)
+        let date = Date(timeIntervalSince1970: 1_800_000_200)
         return [AutoAskTests.stroke([CGPoint(x: 400, y: 200), CGPoint(x: 700, y: 200), CGPoint(x: 700, y: 450),
                                      CGPoint(x: 400, y: 450), CGPoint(x: 400, y: 200)], at: date),
                 AutoAskTests.stroke([CGPoint(x: 500, y: 200), CGPoint(x: 500, y: 380)], at: date)]
     }
     /// "find path", written under the maze after Auto Ask already sent the maze.
-    var note: PKStroke { AutoAskTests.stroke([CGPoint(x: 460, y: 500), CGPoint(x: 600, y: 520)], at: Date(timeIntervalSince1970: 300)) }
+    var note: PKStroke { AutoAskTests.stroke([CGPoint(x: 460, y: 500), CGPoint(x: 600, y: 520)], at: Date(timeIntervalSince1970: 1_800_000_300)) }
 
     func document(_ strokes: [PKStroke] = [], objects: [DocumentObject] = []) -> FakeAskDocument {
         FakeAskDocument(type: .canvas, pages: [page],

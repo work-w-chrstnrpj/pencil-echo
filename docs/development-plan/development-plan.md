@@ -51,6 +51,7 @@ Ticket files live in `tickets/`. Owner decisions: signing with a free Apple ID P
 | [020 Editor top bar, AI toolbar and settings panel](../../tickets/020-editor-shell-and-ai-toolbar.md) | PE-002 | Codex (implemented; native checks/builds verified; simulator runtime and owner gates open) | 008, 010, 012, 014, 015 |
 | [021 Agent chat panel](../../tickets/021-agent-chat-panel.md) | PE-003 | Codex (implemented after editor shell; native checks/builds verified; simulator runtime and owner live gates open) | 010, 016, 017, 020 |
 | [022 Library navigation sidebar](../../tickets/022-library-navigation-sidebar.md) | PE-004 | OpenCode (open) | 009 |
+| [023 LAN MCP for Claude Code](../../tickets/023-lan-mcp-for-claude-code.md) | PE-005 (moved earlier) | Claude (simulator end-to-end verified; owner A16 + Claude Code pending) | 017, 018, 019, 021 |
 
 
 ### Agent assignments for 017–022 (2026-11-04)

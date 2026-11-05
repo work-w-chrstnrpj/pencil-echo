@@ -209,7 +209,8 @@ final class AskAIController {
 
     /// Bounds of the strokes created since the last newest-ink capture, plus the margin.
     var newestInkRegion: CGRect? {
-        let strokes = document.snapshot.drawing.strokes.filter { $0.path.creationDate > inkWatermark }
+        // AI and draft ink is dated in the first day of 1970, so it is never the newest ink.
+        let strokes = document.snapshot.drawing.strokes.filter { $0.path.creationDate > inkWatermark && !DraftMarker.isSynthetic($0.path.creationDate) }
         guard let first = strokes.first else { return nil }
         let bounds = strokes.dropFirst().reduce(first.renderBounds) { $0.union($1.renderBounds) }
         return bounds.insetBy(dx: -Self.captureMargin, dy: -Self.captureMargin)

@@ -2,8 +2,9 @@ import SwiftUI
 import Observation
 import UIKit
 
-extension EditorSession: AskAIDocument {
+extension EditorSession: AskAIDocument, MCPDraftDocument {
     var documentId: UUID { manifest.id }
+    var title: String { manifest.title }
     var captureAssetsURL: URL? { store.rootURL.appendingPathComponent(manifest.id.uuidString + ".pencilecho").appendingPathComponent(DocumentStore.FileName.assets) }
 }
 
@@ -16,6 +17,17 @@ final class AskAIRegionSource {
     var region: CGRect { controller?.askAIRegion ?? .zero }
     var selectionRegion: CGRect?
     var selection: CGRect? { selectionRegion }
+}
+
+/// The open editor as an MCP share target (ticket 023).
+@MainActor
+final class MCPEditorTarget: MCPShareTarget {
+    let session: EditorSession
+    let source: AskAIRegionSource
+    init(session: EditorSession, source: AskAIRegionSource) { self.session = session; self.source = source }
+    var shareDocument: any MCPDraftDocument { session }
+    func visibleRegion() -> CGRect { source.controller?.visiblePageRegion ?? .zero }
+    func selectionRegion() -> CGRect? { source.selection }
 }
 
 /// One editor shell owns both trailing panels; PencilKit remains the drawing picker.
@@ -38,6 +50,9 @@ struct AskAIEditorContainer: View {
     @State private var title = ""
     @State private var showsDelay = false
     @State private var export: ExportPNG?
+    @State private var mcpTarget: MCPEditorTarget
+    @State private var showsShare = false
+    @State private var shareCenter = MCPShareCenter.shared
     @State private var error: String?
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -48,6 +63,7 @@ struct AskAIEditorContainer: View {
         _chat = State(initialValue: AgentChatController(session: session, region: { source.controller?.visiblePageRegion ?? .zero }, selection: { source.selection }))
         _panel = State(initialValue: session.manifest.chatPanelOpen == true ? "chat" : nil)
         _ask = State(initialValue: AskAIController(document: session, region: { source.region }, selection: { source.selection }))
+        _mcpTarget = State(initialValue: MCPEditorTarget(session: session, source: source))
     }
 
     var body: some View {
@@ -79,8 +95,14 @@ struct AskAIEditorContainer: View {
             if value == "chat" { ask.cancel() }
             autoAsk = AutoAskSettings.load(); canvasSettings = CanvasAISettings.load(); providerSettings = AISettings.load()
         }
-        .task { ask.suspendAutoAsk(panel == "chat") }
-        .onDisappear { ask.cancel(); chat.cancel() }
+        .task {
+            ask.suspendAutoAsk(panel == "chat")
+#if DEBUG
+            // End-to-end checks (ticket 023): `-MCPAutoShare YES` shares the opened document.
+            if UserDefaults.standard.bool(forKey: "MCPAutoShare") { MCPShareCenter.shared.share(mcpTarget) }
+#endif
+        }
+        .onDisappear { ask.cancel(); chat.cancel(); MCPShareCenter.shared.stopSharing(mcpTarget) }
     }
 
     private var editor: some View {
@@ -105,6 +127,9 @@ struct AskAIEditorContainer: View {
         }
         .overlay(alignment: .top) {
             if case .review = ask.phase { AskAIOverlay(controller: ask) }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if shareCenter.isSharing(mcpTarget) { MCPShareBanner().padding(12) }
         }
         .onChange(of: ask.phase) { _, phase in
             chat.isOtherRequestPending = ask.isPending
@@ -174,6 +199,9 @@ struct AskAIEditorContainer: View {
                     .frame(minWidth: 60, minHeight: 44).accessibilityLabel("Auto Ask")
                     .accessibilityValue(autoAsk.enabled ? "Auto" : "Manual").accessibilityHint("Switches automatic solving on or off")
                 control("Agent chat", "bubble.left.and.bubble.right") { panel = panel == "chat" ? nil : "chat" }
+                control("Claude Code", shareCenter.isSharing(mcpTarget) ? "laptopcomputer.and.arrow.down" : "laptopcomputer") { showsShare.toggle() }
+                    .accessibilityValue(shareCenter.isSharing(mcpTarget) ? "Sharing" : "Not sharing")
+                    .popover(isPresented: $showsShare) { MCPShareView(target: mcpTarget) }
                 control("Pause delay", "chevron.down") { showsDelay.toggle() }
                     .popover(isPresented: $showsDelay) {
                         Stepper("Pause: \(autoAsk.delaySeconds.formatted()) seconds", value: $autoAsk.delaySeconds, in: 1...10, step: 0.5).padding().frame(minWidth: 280)

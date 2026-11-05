@@ -354,6 +354,17 @@ final class EditorSession {
         commit(next, named: "Chat drafts")
     }
 
+    /// Drafts from Claude Code over MCP (ticket 023). One undo step; the request ID
+    /// is recorded so the same capture can't be placed twice, even after undo.
+    func applyExternalDrafts(_ next: EditorSnapshot, requestId: UUID) {
+        guard !isReadOnly else { return }
+        var conversation = conversation
+        conversation.appliedRequests.append(AppliedRequest(requestId: requestId, appliedAt: Date()))
+        base.conversation = conversation
+        metadataChanged()
+        commit(next, named: "Claude Code drafts")
+    }
+
     func acceptAllDrafts() {
         var next = snapshot
         for i in next.objects.indices where next.objects[i].isDraft == true { next.objects[i].isDraft = nil }

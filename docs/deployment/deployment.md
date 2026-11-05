@@ -58,3 +58,43 @@ Xcode resolves the exact SwiftMath 1.7.3 package pinned in `application/PencilEc
 ## Native provider configuration (013)
 
 Anthropic and Gemini are selected in the existing AI Settings provider picker. Use a base URL (`https://api.anthropic.com/v1` or `https://generativelanguage.googleapis.com/v1beta`), not a complete message/generation endpoint. Use a bare model ID and save the appropriate provider key locally in Keychain. Each endpoint override requires its own saved key. There are no new dependencies, signing capabilities, services or migrations. Native fixtures do not establish a real-provider or physical-device run; follow [the owner acceptance steps](../api/providers.md#owner-live-acceptance) and record the two providers separately.
+
+## Claude Code on the Mac (ticket 023)
+
+Lets Claude Code, signed in with the owner's Claude subscription, work on the document open on the iPad. No API key or paid service is involved. Contract and security: [mcp.md](../api/mcp.md).
+
+Build the bridge once (Xcode's Swift toolchain), from the repository root:
+
+```bash
+swift build -c release --package-path tools/mcp-bridge
+```
+
+```bash
+mkdir -p ~/.local/bin && cp tools/mcp-bridge/.build/release/pencilecho-mcp ~/.local/bin/
+```
+
+Check the encrypted link works on this Mac:
+
+```bash
+~/.local/bin/pencilecho-mcp selftest
+```
+
+On the iPad, open a document, tap the laptop button in the AI toolbar and copy the pair command. Run it on the Mac, replacing the code:
+
+```bash
+~/.local/bin/pencilecho-mcp pair pe1-xxxxxxxx-...
+```
+
+Add the bridge to Claude Code for every project:
+
+```bash
+claude mcp add pencil-echo --scope user -- ~/.local/bin/pencilecho-mcp serve
+```
+
+Then turn on **Share with Claude Code** on the iPad, keep Pencil Echo open on the same Wi-Fi, and check:
+
+```bash
+~/.local/bin/pencilecho-mcp status
+```
+
+macOS may ask once to allow local network access for Terminal or Claude Code; allow it. In Claude Code, ask for example "Look at my Pencil Echo page and solve the maze." Answers appear on the iPad as drafts: **Drafts → Accept all**.
