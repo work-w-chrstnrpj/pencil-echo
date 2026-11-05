@@ -52,7 +52,6 @@ struct AskAIEditorContainer: View {
     @State private var pencilPans = false
     @State private var inspector: Inspector?
     @State private var rename = false
-    @State private var title = ""
     @State private var export: ExportPNG?
     @State private var mcpTarget: MCPEditorTarget
     @State private var showsShare = false
@@ -89,10 +88,11 @@ struct AskAIEditorContainer: View {
                     .inspectorColumnWidth(min: 320, ideal: 360, max: 400)
             }
             .sheet(item: $export) { item in PNGShareSheet(data: item.data) }
-            .alert("Rename document", isPresented: $rename) {
-                TextField("Document name", text: $title)
-                Button("Cancel", role: .cancel) {}
-                Button("Rename") { if !session.rename(to: title) { error = "Enter a title of 1–200 characters." } }
+            // A sheet, not an alert: an alert opened from a closing menu can be dropped.
+            .sheet(isPresented: $rename) {
+                EditorRenameSheet(title: session.manifest.title) { title in
+                    if !session.rename(to: title) { error = "Enter a title of 1–200 characters." }
+                }
             }
             .alert("Couldn't rename", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK") { error = nil }
@@ -253,7 +253,7 @@ struct AskAIEditorContainer: View {
     }
 
     @ViewBuilder private var titleMenu: some View {
-        Button("Rename…", systemImage: "pencil") { title = session.manifest.title; rename = true }
+        Button("Rename…", systemImage: "pencil") { rename = true }
             .disabled(session.isReadOnly)
             .accessibilityIdentifier("editor-rename")
         Button("Export page as PNG", systemImage: "square.and.arrow.up") {
@@ -465,6 +465,47 @@ struct AskAIEditorContainer: View {
     private func setFullscreen(_ enabled: Bool) {
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { fullscreen = enabled }
         if enabled { inspector = nil }
+    }
+}
+
+/// Rename from the title menu: one field, Cancel and Rename (ticket 024).
+private struct EditorRenameSheet: View {
+    @State private var text: String
+    let onRename: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focused: Bool
+
+    init(title: String, onRename: @escaping (String) -> Void) {
+        _text = State(initialValue: title)
+        self.onRename = onRename
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Document name", text: $text)
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .onSubmit(save)
+                    .accessibilityIdentifier("editor-rename-field")
+            }
+            .navigationTitle("Rename")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Rename", action: save)
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .presentationDetents([.height(200)])
+    }
+
+    private func save() {
+        onRename(text)
+        dismiss()
     }
 }
 

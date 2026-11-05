@@ -165,10 +165,15 @@ final class EditorUITests: XCTestCase {
         let rename = app.buttons["Rename…"].firstMatch
         XCTAssertTrue(rename.waitForExistence(timeout: 5))
         rename.tap()
-        let field = app.alerts.textFields.firstMatch
+        let field = app.textFields["editor-rename-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (field.value as? String ?? "").count) + "Shell journey")
-        app.alerts.buttons["Rename"].tap()
+        app.navigationBars["Rename"].buttons["Rename"].tap()
+        // Wait for the sheet to close before using the editor's bar again.
+        XCTAssertTrue(app.navigationBars["Rename"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars.staticTexts["Shell journey"].firstMatch.waitForExistence(timeout: 5)
+                      || app.navigationBars.buttons["Shell journey"].firstMatch.waitForExistence(timeout: 1))
         // View menu: page pattern off, then full screen and back.
         element(app, "editor-view-menu").tap()
         app.buttons["Show page pattern"].firstMatch.tap()

@@ -94,4 +94,6 @@ Claude implements this one. Branch `ui/024-editor-chrome` in its own worktree. M
 - **Full screen:** hides the bar; a glass exit button top-trailing; ⌘⇧F toggles, Esc exits or stops a request.
 - **Claude Code:** status capsule with a green/orange dot when sharing; opens `MCPShareView` in a popover. `MCPShareBanner` is no longer placed.
 - **Tests:** four editor journeys moved to `EditorUITests.swift` and rewritten, plus two new ones (one command bar, selection bar). Findings: system menu items don't carry SwiftUI identifiers (find by label); toggles keep a menu open on iPadOS 27; with an inspector open in portrait the bar overflows, so Chat sits in the overflow menu (the panel has Close).
+- **Rename** opens a small sheet (text field, Cancel, Rename) from the title menu. An alert opened from a closing menu is sometimes dropped, and when it did open, its Rename action read the name from before typing.
+- **Verified (iPad A16 simulator):** 258 unit tests in 26 suites pass; all 9 UI journeys pass (6 editor: one command bar, rich source, selection bar, shell controls, chat + drafts, compact settings; 3 library). Screenshots in `tests/evidence/024/`. Owner checks on the A16 with Apple Pencil, VoiceOver and Split View are still open.
 
