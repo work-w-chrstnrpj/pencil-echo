@@ -16,7 +16,6 @@ struct LibraryView: View {
     @State private var unavailable: DocumentSummary?
     @State private var showsAISettings = false
     @Environment(\.scenePhase) private var scenePhase
-    @ScaledMetric(relativeTo: .body) private var cellWidth = 200.0
 
     private var section: LibrarySection { selectedSection ?? .all }
     private var sort: LibrarySort { LibrarySort(rawValue: sortRawValue) ?? .lastModified }
@@ -35,14 +34,9 @@ struct LibraryView: View {
                 .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
                             prompt: "Search documents")
                 .toolbar {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        sortMenu
-                        layoutButton
-                        Button("New Canvas", systemImage: "square.and.pencil") { create(.canvas) }
-                            .disabled(model.isWorking)
-                        Button("New Notebook", systemImage: "book.closed") { create(.notebook) }
-                            .disabled(model.isWorking)
-                    }
+                    ToolbarItem(placement: .primaryAction) { viewOptions }
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                    ToolbarItem(placement: .primaryAction) { newMenu }
                 }
         }
         .navigationSplitViewStyle(.balanced)
@@ -109,8 +103,9 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 Divider()
                 Button { showsAISettings = true } label: {
-                    Label("AI Settings", systemImage: "gearshape")
+                    Label("Settings", systemImage: "gearshape")
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: 44)
                         .padding(.vertical, 12)
                         .padding(.horizontal, 16)
                         .contentShape(Rectangle())
@@ -124,6 +119,7 @@ struct LibraryView: View {
 
     private func sidebarRow(_ item: LibrarySection) -> some View {
         Label(item.title, systemImage: item.symbolName)
+            .badge(Text(model.count(in: item), format: .number))
             .tag(item)
             .accessibilityIdentifier("library-sidebar-" + item.rawValue)
     }
@@ -147,26 +143,27 @@ struct LibraryView: View {
     }
 
     private var grid: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: min(cellWidth, max(1, geometry.size.width - 40))),
-                                            spacing: 20, alignment: .top)], spacing: 24) {
-                    ForEach(displayedItems) { item in
-                        Button { open(item) } label: {
-                            LibraryCell(item: item, refreshToken: model.previewGeneration)
-                        }
-                        .accessibilityIdentifier(cellIdentifier(item))
-                        .disabled(model.isWorking)
-                        .buttonStyle(.plain)
-                        .contextMenu { contextMenu(for: item) }
-                        .accessibilityActions { accessibilityActions(for: item) }
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 20, alignment: .top)], spacing: 20) {
+                ForEach(displayedItems) { item in
+                    Button { open(item) } label: {
+                        LibraryCell(item: item, refreshToken: model.previewGeneration)
                     }
+                    .accessibilityIdentifier(cellIdentifier(item))
+                    .disabled(model.isWorking)
+                    .buttonStyle(.plain)
+                    .hoverEffect(.highlight)
+                    .contextMenu { contextMenu(for: item) } preview: {
+                        LibraryPagePreview(item: item, refreshToken: model.previewGeneration)
+                            .frame(width: 240, height: item.type == .notebook ? 240 * 1.414 : 180)
+                    }
+                    .accessibilityActions { accessibilityActions(for: item) }
                 }
-                .padding(20)
             }
-            .refreshable { await model.refresh() }
-            .accessibilityIdentifier("library-grid")
+            .padding(20)
         }
+        .refreshable { await model.refresh() }
+        .accessibilityIdentifier("library-grid")
     }
 
     private var list: some View {
@@ -178,6 +175,12 @@ struct LibraryView: View {
                     .buttonStyle(.plain)
                     .contextMenu { contextMenu(for: item) }
                     .accessibilityActions { accessibilityActions(for: item) }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button("Delete", systemImage: "trash", role: .destructive) { deleting = item }
+                        Button(item.isFavorite ? "Unfavorite" : "Favorite", systemImage: item.isFavorite ? "star.slash" : "star") {
+                            Task { await model.toggleFavorite(item) }
+                        }.disabled(item.state != .ok)
+                    }
             }
         }
         .listStyle(.plain)
@@ -215,39 +218,70 @@ struct LibraryView: View {
         }
     }
 
-    private var sortMenu: some View {
+    private var viewOptions: some View {
         Menu {
-            Picker("Sort", selection: $sortRawValue) {
-                ForEach(LibrarySort.allCases) { option in
-                    Label(option.title, systemImage: option.symbolName).tag(option.rawValue)
+            Section("Sort by") {
+                if section == .recent {
+                    Text("Sorted by last opened").disabled(true)
+                } else {
+                    Picker("Sort by", selection: $sortRawValue) {
+                        ForEach(LibrarySort.allCases) { option in
+                            Text(option == .lastModified ? "Last modified" : option == .lastOpened ? "Last opened" : option.title).tag(option.rawValue)
+                        }
+                    }.pickerStyle(.inline)
+                }
+            }
+            Section("Show as") {
+                // The alternate choice keeps the existing toggle identifier; both
+                // choices remain explicit and the selected layout is checkmarked.
+                ForEach(LibraryLayout.allCases) { option in
+                    Button {
+                        layoutRawValue = option.rawValue
+                    } label: {
+                        if option == layout {
+                            Label(option == .grid ? "Grid" : "List", systemImage: "checkmark")
+                        } else {
+                            Text(option == .grid ? "Grid" : "List")
+                        }
+                    }
+                    .accessibilityIdentifier(option == layout ? "library-layout-current" : "library-layout-toggle")
+                    .accessibilityValue(option == layout ? "Selected" : "")
                 }
             }
         } label: {
-            Label("Sort", systemImage: "arrow.up.arrow.down")
+            Label("View options", systemImage: "line.3.horizontal.decrease.circle")
         }
-        .disabled(section == .recent)
-        .help(section == .recent ? "Recent is newest opened first" : "Sort documents")
         .accessibilityIdentifier("library-sort")
+        .accessibilityHint("Choose how documents are sorted and displayed")
     }
 
-    private var layoutButton: some View {
-        Button(layout == .grid ? "List" : "Grid",
-               systemImage: layout == .grid ? "list.bullet" : "square.grid.2x2") {
-            layoutRawValue = (layout == .grid ? LibraryLayout.list : .grid).rawValue
+    private var newMenu: some View {
+        Menu {
+            Button("New Canvas", systemImage: "square.and.pencil") { create(.canvas) }
+                .keyboardShortcut("n", modifiers: .command)
+            Button("New Notebook", systemImage: "book.closed") { create(.notebook) }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+        } label: {
+            Label("New", systemImage: "plus")
+        } primaryAction: {
+            create(.canvas)
         }
-        .accessibilityIdentifier("library-layout-toggle")
-        .help(layout == .grid ? "Show as list" : "Show as grid")
+        .buttonStyle(.glassProminent)
+        .disabled(model.isWorking)
+        .accessibilityIdentifier("library-new")
+        .accessibilityHint("Creates a canvas. Touch and hold for canvas and notebook choices.")
     }
 
     @ViewBuilder
     private func contextMenu(for item: DocumentSummary) -> some View {
+        Button("Open", systemImage: "doc") { open(item) }
+        Button("Rename", systemImage: "pencil") { renaming = item }
+            .disabled(item.state != .ok)
         Button(item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
                systemImage: item.isFavorite ? "star.slash" : "star") {
             Task { await model.setFavorite(item, isFavorite: !item.isFavorite) }
         }
         .disabled(item.state != .ok)
-        Button("Rename", systemImage: "pencil") { renaming = item }
-            .disabled(item.state != .ok)
         Button("Delete", systemImage: "trash", role: .destructive) { deleting = item }
     }
 
@@ -298,8 +332,9 @@ private struct LibraryThumbnail: View {
             if let thumbnail {
                 Image(uiImage: thumbnail).resizable().scaledToFit().padding(padding)
             } else {
-                Image(systemName: item.symbolName)
-                    .font(.system(size: 40))
+                Label(item.typeName, systemImage: item.symbolName)
+                    .labelStyle(.iconOnly)
+                    .font(.largeTitle)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -327,79 +362,87 @@ private struct LibraryThumbnail: View {
     }
 }
 
-private struct LibraryCell: View {
+/// Page chrome is shared by cards and their context-menu preview.
+private struct LibraryPagePreview: View {
     let item: DocumentSummary
     let refreshToken: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LibraryThumbnail(item: item, refreshToken: refreshToken)
-                .frame(maxWidth: .infinity)
-                .aspectRatio(4 / 3, contentMode: .fit)
-                .background(Color(uiColor: .secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(item.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                if item.isFavorite {
-                    Image(systemName: "star.fill")
+        Group {
+            if let reason = item.unavailableReason {
+                VStack(spacing: 8) {
+                    Label(reason, systemImage: "exclamationmark.triangle")
+                        .symbolRenderingMode(.hierarchical)
                         .font(.subheadline)
-                        .foregroundStyle(.yellow)
-                        .accessibilityHidden(true)
-                }
+                        .multilineTextAlignment(.center)
+                }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                LibraryThumbnail(item: item, refreshToken: refreshToken)
             }
-            Label {
-                if let reason = item.unavailableReason {
-                    Text(reason)
-                } else if let date = item.updatedAt {
-                    Text(date, format: .dateTime.day().month().year().hour().minute())
-                }
-            } icon: {
-                Image(systemName: item.symbolName)
-            }
-            .font(.subheadline)
-            .foregroundStyle(item.state == .ok ? .secondary : Color.red)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color(uiColor: .separator), lineWidth: 1))
+        .accessibilityHidden(true)
+    }
+}
+
+private struct LibraryCell: View {
+    let item: DocumentSummary
+    let refreshToken: Int
+    @Environment(\.dynamicTypeSize) private var textSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LibraryPagePreview(item: item, refreshToken: refreshToken)
+                .aspectRatio(item.type == .notebook ? 1 / 1.414 : 4 / 3, contentMode: .fit)
+            LibraryTitle(item: item, lineLimit: textSize.isAccessibilitySize ? nil : 2)
+            if item.state == .ok {
+                Text(item.relativeEditedText).font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText)
+        .accessibilityLabel(libraryAccessibilityText(item))
         .accessibilityHint(item.state == .ok ? "Opens the document" : "")
         .accessibilityAddTraits(.isButton)
     }
-
-    private var accessibilityText: String { libraryAccessibilityText(item) }
 }
 
-/// A library list row: small thumbnail, title, type, modified date and favorite state.
+private struct LibraryTitle: View {
+    let item: DocumentSummary
+    var lineLimit: Int?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(item.title).font(.headline).lineLimit(lineLimit).fixedSize(horizontal: false, vertical: true)
+            if item.isFavorite {
+                Label("Favorite", systemImage: "star.fill")
+                    .labelStyle(.iconOnly).font(.subheadline).foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
 private struct LibraryRow: View {
     let item: DocumentSummary
     let refreshToken: Int
 
     var body: some View {
         HStack(spacing: 12) {
-            LibraryThumbnail(item: item, refreshToken: refreshToken, padding: 2)
-                .frame(width: 72, height: 54)
+            LibraryThumbnail(item: item, refreshToken: refreshToken, padding: 4)
+                .frame(width: 56, height: 56)
                 .background(Color(uiColor: .secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(uiColor: .separator), lineWidth: 1))
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(item.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                    if item.isFavorite {
-                        Image(systemName: "star.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.yellow)
-                            .accessibilityHidden(true)
-                    }
-                }
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(item.state == .ok ? .secondary : Color.red)
-                    .lineLimit(1)
+                LibraryTitle(item: item, lineLimit: nil)
+                Text(item.typeName + " · " + (item.unavailableReason ?? item.relativeEditedText))
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
@@ -410,25 +453,11 @@ private struct LibraryRow: View {
         .accessibilityHint(item.state == .ok ? "Opens the document" : "")
         .accessibilityAddTraits(.isButton)
     }
-
-    private var subtitle: String {
-        if let reason = item.unavailableReason {
-            return item.typeName + " · " + reason
-        }
-        guard let date = item.updatedAt else { return item.typeName }
-        return item.typeName + " · Edited " + date.formatted(date: .abbreviated, time: .shortened)
-    }
 }
 
-/// Shared accessible description: title, type, favorite state and availability.
 private func libraryAccessibilityText(_ item: DocumentSummary) -> String {
-    var parts = [item.title, item.typeName]
+    var parts = [item.title, item.typeName, item.unavailableReason ?? item.relativeEditedText]
     if item.isFavorite { parts.append("Favorite") }
-    if let reason = item.unavailableReason {
-        parts.append(reason)
-    } else if let date = item.updatedAt {
-        parts.append("edited " + date.formatted(date: .abbreviated, time: .shortened))
-    }
     return parts.joined(separator: ", ")
 }
 

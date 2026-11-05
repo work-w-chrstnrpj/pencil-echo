@@ -46,6 +46,38 @@ final class LibraryTests {
         return id
     }
 
+    @Test func sidebarCountsMatchUnsearchedSections() async throws {
+        let now = Date()
+        try writePackage(title: "Favorite canvas", createdAt: now, updatedAt: now, lastOpenedAt: now, isFavorite: true)
+        try writePackage(title: "Older notebook", type: .notebook, createdAt: now, updatedAt: now,
+                         lastOpenedAt: now.addingTimeInterval(-40 * 86400))
+        try writePackage(title: "Unopened canvas", createdAt: now, updatedAt: now)
+        let model = LibraryModel(store: store, now: { now })
+        await model.refresh()
+        #expect(model.count(in: .all) == 3)
+        #expect(model.count(in: .recent) == 1)
+        #expect(model.count(in: .favorites) == 1)
+        #expect(model.count(in: .canvases) == 2)
+        #expect(model.count(in: .notebooks) == 1)
+        for section in LibrarySection.allCases {
+            #expect(model.count(in: section) == model.displayedItems(in: section).count)
+        }
+        #expect(model.displayedItems(in: .all, search: "missing").isEmpty)
+        #expect(model.count(in: .all) == 3)
+    }
+
+    @Test func relativeEditedTextHandlesKnownAndMissingDates() async throws {
+        let now = Date()
+        try writePackage(title: "Edited", createdAt: now, updatedAt: now.addingTimeInterval(-7200))
+        let model = LibraryModel(store: store)
+        await model.refresh()
+        var item = try #require(model.items.first)
+        #expect(item.relativeEditedText.hasPrefix("Edited "))
+        #expect(item.relativeEditedText != "Edited date unavailable")
+        item.updatedAt = nil
+        #expect(item.relativeEditedText == "Edited date unavailable")
+    }
+
     // MARK: Store
 
     @Test func renameKeepsRevisionAndContent() async throws {

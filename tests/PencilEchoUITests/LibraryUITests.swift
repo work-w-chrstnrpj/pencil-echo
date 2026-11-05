@@ -25,10 +25,38 @@ final class LibraryUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Pencil Echo"].waitForExistence(timeout: 10))
     }
 
+    // Ticket 025 helpers are used only by the three library journeys.
+    private func libraryCreate(_ app: XCUIApplication, notebook: Bool = false) {
+        let new = app.buttons["library-new"].firstMatch
+        XCTAssertTrue(new.waitForExistence(timeout: 10))
+        if notebook {
+            new.press(forDuration: 1)
+            app.buttons["New Notebook"].firstMatch.tap()
+        } else { new.tap() }
+    }
+
+    private func libraryToggleLayout(_ app: XCUIApplication) {
+        app.buttons["library-sort"].tap()
+        let alternate = app.buttons["library-layout-toggle"].firstMatch
+        XCTAssertTrue(alternate.waitForExistence(timeout: 5))
+        alternate.tap()
+    }
+
+    private func libraryCapture(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "025-" + name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testCreateRenameReopenRelaunchAndConfirmedDelete() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
         let app = application()
+        app.launchArguments += ["-spike004", "-provider007"]
         app.launch()
-        app.buttons["New Canvas"].firstMatch.tap()
+        XCTAssertFalse(app.buttons["Debug"].exists)
+        libraryCreate(app)
         closeEditor(app)
         let canvas = card(app, title: "Untitled Canvas")
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -48,9 +76,10 @@ final class LibraryUITests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(card(app, title: "Library journey").waitForExistence(timeout: 10))
-        app.buttons["New Notebook"].firstMatch.tap()
+        libraryCreate(app, notebook: true)
         closeEditor(app)
         XCTAssertTrue(card(app, title: "Untitled Notebook").waitForExistence(timeout: 5))
+        libraryCapture(app, "grid")
         card(app, title: "Library journey").press(forDuration: 1)
         app.buttons["Delete"].firstMatch.tap()
         XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5))
@@ -128,16 +157,23 @@ final class LibraryUITests: XCTestCase {
     }
 
     func testFavoriteSearchAndListLayoutSurviveRelaunch() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
         let app = application()
+        app.launchArguments += ["-AppleInterfaceStyle", "Dark"]
         app.launch()
-        app.buttons["New Canvas"].firstMatch.tap()
+        app.descendants(matching: .any)["library-sidebar-favorites"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["No Favorites Yet"].waitForExistence(timeout: 5))
+        libraryCapture(app, "empty-favorites")
+        app.descendants(matching: .any)["library-sidebar-all"].firstMatch.tap()
+        libraryCreate(app)
         closeEditor(app)
 
         let canvas = card(app, title: "Untitled Canvas")
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         // Normalize the layout remembered from any earlier run.
         if app.descendants(matching: .any)["library-list"].firstMatch.exists {
-            app.buttons["library-layout-toggle"].tap()
+            libraryToggleLayout(app)
         }
         XCTAssertTrue(app.descendants(matching: .any)["library-grid"].firstMatch.waitForExistence(timeout: 5))
         canvas.press(forDuration: 1)
@@ -161,15 +197,20 @@ final class LibraryUITests: XCTestCase {
         search.typeText(" missing")
         XCTAssertTrue(card(app, title: "Untitled Canvas").waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["No Results"].waitForExistence(timeout: 5))
+        libraryCapture(app, "search-no-results")
         let typed = search.value as? String ?? ""
         search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: typed.count))
         XCTAssertTrue(card(app, title: "Untitled Canvas").waitForExistence(timeout: 5))
 
+        // Persist a sort choice through the combined menu as well.
+        app.buttons["library-sort"].tap()
+        app.buttons["Title"].firstMatch.tap()
         // Switch to the list layout and keep the same row identifier.
-        app.buttons["library-layout-toggle"].tap()
+        libraryToggleLayout(app)
         let list = app.descendants(matching: .any)["library-list"].firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 5))
         XCTAssertTrue(card(app, title: "Untitled Canvas").exists)
+        libraryCapture(app, "list")
         let listed = XCTAttachment(screenshot: app.screenshot())
         listed.name = "022-library-list"
         listed.lifetime = .keepAlways
@@ -186,6 +227,22 @@ final class LibraryUITests: XCTestCase {
         afterRelaunch.name = "022-library-list-after-relaunch"
         afterRelaunch.lifetime = .keepAlways
         add(afterRelaunch)
+        libraryCapture(app, "dark-mode")
+        app.buttons["library-sort"].tap()
+        XCTAssertTrue(app.buttons["Title"].firstMatch.exists)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap()
+        app.buttons["library-ai-settings"].tap()
+        XCTAssertTrue(app.navigationBars["AI Settings"].waitForExistence(timeout: 5))
+        app.navigationBars["AI Settings"].buttons["Done"].tap()
+        card(app, title: "Untitled Canvas").swipeLeft()
+        app.buttons["Unfavorite"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["No Favorites Yet"].waitForExistence(timeout: 5))
+        app.descendants(matching: .any)["library-sidebar-all"].firstMatch.tap()
+        card(app, title: "Untitled Canvas").swipeLeft()
+        app.buttons["Delete"].firstMatch.tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5))
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertTrue(card(app, title: "Untitled Canvas").exists)
     }
 
     func testEditorShellControls() {
@@ -262,6 +319,8 @@ final class LibraryUITests: XCTestCase {
     }
 
     func testDamagedPackageAndAccessibilityTextSize() {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
         let app = application(damaged: true, largeText: true)
         app.launch()
         let damaged = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'library-document-' AND label CONTAINS %@", "Can't open")).firstMatch
@@ -275,6 +334,7 @@ final class LibraryUITests: XCTestCase {
         attachment.name = "009-library-large-text-damaged-package"
         attachment.lifetime = .keepAlways
         add(attachment)
+        libraryCapture(app, "large-text-damaged")
     }
 }
 

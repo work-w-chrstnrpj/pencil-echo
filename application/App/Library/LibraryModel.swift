@@ -265,6 +265,11 @@ final class LibraryModel {
         return selected.sorted { isOrderedBefore($0, $1, by: section == .recent ? .lastOpened : sort) }
     }
 
+    /// Sidebar totals reflect the section, independent of the active search/sort.
+    func count(in section: LibrarySection) -> Int {
+        items.filter { contains($0, in: section) }.count
+    }
+
     private func contains(_ item: DocumentSummary, in section: LibrarySection) -> Bool {
         switch section {
         case .recent:
@@ -311,6 +316,11 @@ final class LibraryModel {
 }
 
 extension DocumentSummary {
+    var relativeEditedText: String {
+        guard let updatedAt else { return "Edited date unavailable" }
+        return "Edited " + updatedAt.formatted(.relative(presentation: .numeric, unitsStyle: .wide))
+    }
+
     var thumbnailURL: URL { packageURL.appendingPathComponent(DocumentStore.FileName.thumbnail) }
 
     var typeName: String {
