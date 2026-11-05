@@ -1,0 +1,95 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.21961,0.15686,0.60392,1.00000",
+      "srgb:0.05490,0.45098,1.00000,1.00000"
+    ],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0.0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1.0
+      }
+    }
+  },
+  "groups": [
+    {
+      "name": "Spark",
+      "layers": [
+        {
+          "name": "sparkle",
+          "image-name": "sparkle.svg",
+          "glass": true
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      },
+      "specular": true
+    },
+    {
+      "name": "Pencil",
+      "layers": [
+        {
+          "name": "pencil",
+          "image-name": "pencil.svg",
+          "glass": true
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.2
+      },
+      "specular": true
+    },
+    {
+      "name": "Annotation",
+      "layers": [
+        {
+          "name": "annotation",
+          "image-name": "annotation.svg",
+          "glass": true
+        },
+        {
+          "name": "echo inner",
+          "image-name": "echo-inner.svg",
+          "glass": true,
+          "opacity": 0.55
+        },
+        {
+          "name": "echo outer",
+          "image-name": "echo-outer.svg",
+          "glass": true,
+          "opacity": 0.3
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      },
+      "specular": true
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

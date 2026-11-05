@@ -68,3 +68,12 @@ Use these values; don't invent new ones.
 - Custom glass (`.ultraThinMaterial` cards pretending to be glass), custom blur stacks, drop shadows on chrome.
 - Debug or developer UI in any build users see.
 - Color-only state, icon-only buttons without labels, fixed font sizes.
+
+## 7. App icon
+
+`application/App/Resources/AppIcon.icon` is an Icon Composer document (Liquid Glass, iPadOS 26+), set as the app icon with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`. Previews: `docs/design/icon/` (default, dark, tinted).
+
+- **Story:** an Apple Pencil draws a hand-drawn annotation loop; the loop's echoes ripple outward; a gold AI sparkle sits inside the loop. Pencil, echo, annotation, AI.
+- **Layers:** three glass groups (sparkle, pencil, annotation with two echo arcs at 55 % and 30 % opacity) on an indigo-to-blue linear gradient. The system renders light, dark, clear and tinted appearances from these layers.
+- **Original artwork:** no upstream PenEcho artwork, name or logo is used.
+- **Changing it:** edit `scripts/make-app-icon.py` and run `python3 scripts/make-app-icon.py application/App/Resources/AppIcon.icon` (delete the old `.icon` folder first), or open the `.icon` in Icon Composer (Xcode → Open Developer Tool). Check a rendition with `ictool` (inside Icon Composer.app) before committing.
