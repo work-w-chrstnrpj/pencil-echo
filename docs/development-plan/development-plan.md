@@ -52,6 +52,10 @@ Ticket files live in `tickets/`. Owner decisions: signing with a free Apple ID P
 | [021 Agent chat panel](../../tickets/021-agent-chat-panel.md) | PE-003 | Codex (implemented after editor shell; native checks/builds verified; simulator runtime and owner live gates open) | 010, 016, 017, 020 |
 | [022 Library navigation sidebar](../../tickets/022-library-navigation-sidebar.md) | PE-004 | OpenCode (open) | 009 |
 | [023 LAN MCP for Claude Code](../../tickets/023-lan-mcp-for-claude-code.md) | PE-005 (moved earlier) | Claude (simulator end-to-end verified; owner A16 + Claude Code pending) | 017, 018, 019, 021 |
+| [024 Editor chrome redesign](../../tickets/024-editor-chrome-redesign.md) | UI/UX | Claude (senior; open) | — |
+| [025 Library navigation polish](../../tickets/025-library-navigation-polish.md) | UI/UX | Codex (mid; open) | — |
+| [026 Settings and Chat panels](../../tickets/026-settings-and-chat-panels.md) | UI/UX | Cursor Grok (junior; open) | — |
+| [027 Claude Code share popover](../../tickets/027-claude-code-share-popover.md) | UI/UX | OpenCode (intern; open) | — |
 
 
 ### Agent assignments for 017–022 (2026-11-04)
@@ -73,6 +77,20 @@ Assigned by fit with each agent's strengths. Claude reviews every PR before merg
 - `application/App/AskAI/`: 017 owns the capture code; 020 changes only `AskAIOverlay.swift` and the status hooks.
 - `docs/database/document-schema-v1.md` and `shared/Document/`: 020 (grid flag), 022 (favorite, last opened) and 021 (chat history) each add separate optional fields; merge in that order and rebase.
 - 022's favorite button in the editor top bar waits for 020; until then 022 ships the library context menu only.
+
+
+### UI/UX upgrade, tickets 024–027 (2026-11-05)
+
+Owner review: the editor has two rows of commands, unclear AI controls and duplicates; the library shows a Debug button. All four tickets follow [the UI style guide](../design/ui-style-guide.md) (HIG, Liquid Glass, iPadOS 27).
+
+| Agent (level) | Ticket | Scope |
+|---|---|---|
+| Claude (senior, reviews all) | 024 | Editor chrome: one command bar, selection bar, inspectors, Claude Code status. Riskiest: UIKit + PencilKit. |
+| Codex (mid) | 025 | Library toolbar, sidebar counts, cards, empty states; remove the Debug menu. |
+| Cursor Grok (junior) | 026 | Settings and Chat panel *content* (two files, look only). |
+| OpenCode (intern) | 027 | Claude Code share popover and banner (one file, look only). |
+
+**No dependencies, no shared files.** Each ticket lists the only files it may edit. Only 024 adds files (`project.pbxproj`). `LibraryUITests.swift` is split by test method: 025 owns the three library tests, and 024 moves the four editor tests to a new `EditorUITests.swift`. Frozen interfaces: `AISettingsView(onDone:)`, `AgentChatView(controller:onClose:)`, `MCPShareView(target:)`, `MCPShareBanner()` and all existing accessibility identifiers. Each agent works in its own worktree, branch `ui/0NN-…`, and simulator `PE-0NN`. Merge order: 027, 026, 025 (any order), then 024 rebased last. Claude reviews every branch against its acceptance criteria before merge.
 
 Ticket 009's library now opens the native editor, preserves package bytes during atomic rename, guards metadata operations on open documents, refreshes thumbnails and has two isolated simulator UI journeys. [The library report](../testing/library-009.md) records final check results and screenshots. These results do not close PE-001's physical A16/Pencil/VoiceOver acceptance or ticket 004's hardware review.
 
