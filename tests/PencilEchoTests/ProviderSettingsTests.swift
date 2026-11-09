@@ -347,3 +347,117 @@ struct EditorToolbarProviderTests {
         }
     }
 }
+
+// MARK: - Qwen free-quota fallback
+
+/// Answers per model: a used-up quota error, an unsupported model, or a text reply.
+private struct ScriptedProvider: AIProvider {
+    enum Outcome: Sendable { case reply(String), fail(AIError), failAfterText(AIError) }
+    let outcomes: [String: Outcome]
+    let tried: @Sendable (String) -> Void
+    func capabilities(model: String) -> ModelCapabilities? {
+        QwenPresets.all[0].defaultModels.first { $0.id == model }?.capabilities
+    }
+    func send(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, Error> {
+        tried(request.model)
+        return AsyncThrowingStream { continuation in
+            switch outcomes[request.model] ?? .reply(request.model) {
+            case .reply(let text): continuation.yield(.textDelta(text)); continuation.yield(.completed(text)); continuation.finish()
+            case .fail(let error): continuation.finish(throwing: error)
+            case .failAfterText(let error): continuation.yield(.textDelta("partial")); continuation.finish(throwing: error)
+            }
+        }
+    }
+}
+
+private final class TriedModels: @unchecked Sendable {
+    private let lock = NSLock()
+    private var models: [String] = []
+    func add(_ model: String) { lock.withLock { models.append(model) } }
+    var all: [String] { lock.withLock { models } }
+}
+
+struct QwenFreeQuotaTests {
+    private func ledger(enabled: Bool = true) -> QwenFreeQuotaLedger {
+        let defaults = UserDefaults(suiteName: "QwenFreeQuotaTests-\(UUID().uuidString)")!
+        let ledger = QwenFreeQuotaLedger(defaults: defaults)
+        ledger.update { $0.enabled = enabled }
+        return ledger
+    }
+    private func request(_ model: String = "qwen3-vl-plus") -> AIRequest {
+        AIRequest(model: model, systemPrompt: "Return JSON.", instruction: "Solve.", pngImages: [Data([0x89])])
+    }
+    private func run(_ provider: any AIProvider, _ request: AIRequest) async throws -> String? {
+        var final: String?
+        for try await event in provider.send(request) { if case .completed(let text) = event { final = text } }
+        return final
+    }
+
+    @Test func usedUpQuotaMovesToNextModelAndIsRemembered() async throws {
+        let ledger = ledger(), tried = TriedModels()
+        let base = ScriptedProvider(outcomes: ["qwen3-vl-plus": .fail(.freeQuotaExhausted),
+                                               "qwen3-vl-plus-2025-12-19": .fail(.freeQuotaExhausted)], tried: tried.add)
+        let provider = QwenFreeQuotaProvider(base: base, ledger: ledger)
+        #expect(try await run(provider, request()) == "qwen3-vl-plus-2025-09-23")
+        #expect(tried.all == ["qwen3-vl-plus", "qwen3-vl-plus-2025-12-19", "qwen3-vl-plus-2025-09-23"])
+        #expect(Set(ledger.state.exhausted.keys) == ["qwen3-vl-plus", "qwen3-vl-plus-2025-12-19"])
+        // The next request skips the used-up models without asking for them again.
+        #expect(try await run(provider, request()) == "qwen3-vl-plus-2025-09-23")
+        #expect(tried.all.count == 4)
+    }
+
+    @Test func selectedModelGoesFirstThenTheList() throws {
+        let provider = QwenFreeQuotaProvider(base: ScriptedProvider(outcomes: [:], tried: { _ in }), ledger: ledger())
+        let chain = provider.chain(for: request("qwen-vl-max"))
+        #expect(chain.first == "qwen-vl-max")
+        #expect(chain.count == QwenPresets.freeQuotaVisionModels.count)
+        #expect(!chain.contains("qwen-turbo"))
+    }
+
+    @Test func otherErrorsAndMidStreamFailuresDoNotFallBack() async throws {
+        for outcome: ScriptedProvider.Outcome in [.fail(.invalidCredentials), .fail(.rateLimited), .failAfterText(.freeQuotaExhausted)] {
+            let tried = TriedModels(), ledger = ledger()
+            let provider = QwenFreeQuotaProvider(base: ScriptedProvider(outcomes: ["qwen3-vl-plus": outcome], tried: tried.add), ledger: ledger)
+            await #expect(throws: AIError.self) { try await run(provider, request()) }
+            #expect(tried.all == ["qwen3-vl-plus"])
+            #expect(ledger.state.exhausted.isEmpty)
+        }
+    }
+
+    @Test func unavailableFallbackIsSkippedButNotRemembered() async throws {
+        let ledger = ledger(), tried = TriedModels()
+        let base = ScriptedProvider(outcomes: ["qwen3-vl-plus": .fail(.freeQuotaExhausted),
+                                               "qwen3-vl-plus-2025-12-19": .fail(.unsupportedModel)], tried: tried.add)
+        #expect(try await run(QwenFreeQuotaProvider(base: base, ledger: ledger), request()) == "qwen3-vl-plus-2025-09-23")
+        #expect(ledger.state.exhausted.keys.sorted() == ["qwen3-vl-plus"])
+    }
+
+    @Test func allUsedUpReportsFreeQuotaExhausted() async throws {
+        let ledger = ledger()
+        for model in QwenPresets.freeQuotaVisionModels { ledger.markExhausted(model) }
+        let tried = TriedModels()
+        let provider = QwenFreeQuotaProvider(base: ScriptedProvider(outcomes: [:], tried: tried.add), ledger: ledger)
+        await #expect(throws: AIError.freeQuotaExhausted) { try await run(provider, request()) }
+        #expect(tried.all.isEmpty)
+    }
+
+    @Test func wrapsOnlySingaporeWhenTurnedOn() {
+        let base = ScriptedProvider(outcomes: [:], tried: { _ in })
+        #expect(QwenFreeQuotaProvider.wrap(base, presetID: "qwen-global", ledger: ledger()) is QwenFreeQuotaProvider)
+        #expect(!(QwenFreeQuotaProvider.wrap(base, presetID: "qwen-us", ledger: ledger()) is QwenFreeQuotaProvider))
+        #expect(!(QwenFreeQuotaProvider.wrap(base, presetID: "qwen-global", ledger: ledger(enabled: false)) is QwenFreeQuotaProvider))
+        #expect(QwenFreeQuotaState().enabled == false)
+    }
+
+    @Test(arguments: [400, 403, 429])
+    func alibabaFreeTierOnlyCodeMapsFromErrorBody(_ status: Int) async throws {
+        let preset = QwenPresets.all[0]
+        let credentials = MemoryCredentials()
+        credentials.save("synthetic-test-key", for: try ProviderIdentity(presetID: preset.id, baseURL: preset.baseURL))
+        let body = Data(#"{"error":{"code":"AllocationQuota.FreeTierOnly","message":"private provider detail"}}"#.utf8)
+        let transport = RecordingTransport(status: status, body: body, contentType: "application/json")
+        let provider = OpenAICompatibleProvider(preset: preset, credentials: credentials, transport: transport)
+        let request = AIRequest(model: "qwen-turbo", systemPrompt: "Return JSON.", instruction: "Solve.")
+        await #expect(throws: AIError.freeQuotaExhausted) { for try await _ in provider.send(request) {} }
+    }
+}

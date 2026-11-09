@@ -16,9 +16,11 @@ The US legacy base URL is also documented in [Alibaba's OCR API guidance](https:
 
 | Model entry | Vision | Streaming | Output mode used | Extra request setting |
 |---|---|---|---|---|
-| qwen3-vl-plus (Debug default) | Yes | Yes | JSON object when a schema is supplied | enable_thinking: false |
-| qwen-vl-plus | Yes | Yes | JSON object when a schema is supplied | None |
-| qwen-vl-max | Yes | Yes | JSON object when a schema is supplied | None |
+| qwen3-vl-plus (default), qwen3-vl-plus-2025-12-19, qwen3-vl-plus-2025-09-23 | Yes | Yes | JSON object when a schema is supplied | enable_thinking: false |
+| qwen3-vl-flash, qwen3-vl-flash-2026-01-22, qwen3-vl-flash-2025-10-15 | Yes | Yes | JSON object when a schema is supplied | enable_thinking: false |
+| qwen-vl-max, -latest, -2025-08-13, -2025-04-08 | Yes | Yes | JSON object when a schema is supplied | None |
+| qwen-vl-plus, -latest, -2025-08-15, -2025-05-07 | Yes | Yes | JSON object when a schema is supplied | None |
+| qwen3-vl-235b-a22b-instruct, qwen3-vl-32b-instruct, qwen3-vl-30b-a3b-instruct, qwen3-vl-8b-instruct | Yes | Yes | Prompt-only | None |
 | qwen-turbo | No | Yes | JSON object when a schema is supplied | None |
 
 The VL aliases above support JSON-object output in non-thinking mode. JSON-object mode requires a JSON instruction and does not enforce field names/types. The adapter includes the v1 schema in the prompt and the Debug screen validates the completed answer locally. It does not advertise strict JSON-schema support for these models. [Alibaba structured output](https://www.alibabacloud.com/help/en/model-studio/qwen-structured-output).
@@ -28,6 +30,15 @@ The vision examples cover qwen3-vl-plus, Base64 data URLs and streaming. The imp
 Ask AI may attach a second PNG when the newest ink is small beside the captured context (ticket 019). The first image is the context region. The second is a magnified copy of the attention region, for reading detail, and it is omitted when that copy would exceed the per-image cap. OpenAI-compatible, Anthropic and Gemini adapters already accept two images and keep that order. No current adapter is limited to one image, so the focus image is not skipped for a protocol reason.
 
 These are explicit model entries, not family-name heuristics. Regional entitlements and alias availability must be proved with the owner's account. Unknown models fail closed until a verified capability entry exists; model discovery, free-text model entry, custom endpoints and other providers are ticket 012/013 work. Preset and per-model quirks remain data, with no Qwen branches in the adapter.
+
+
+### Qwen free quota fallback
+
+Alibaba gives international accounts a separate free quota (usually 1,000,000 tokens) for each model, including each dated snapshot and alias, valid for 90 days. It applies only on the Singapore endpoint (`qwen-global`). Alibaba stopped granting new quota for most older vision models on 2026-10-29. Quota already granted stays until it expires or runs out. Sources (read 2026-11-09): [free quota for new users](https://www.alibabacloud.com/help/en/model-studio/new-free-quota), [model pricing](https://www.alibabacloud.com/help/en/model-studio/model-pricing).
+
+`QwenPresets.freeQuotaVisionModels` lists the vision models above in priority order. When **AI Settings → Free quota → Use free quota across vision models** is on and Qwen · Singapore is selected, `QwenFreeQuotaProvider` wraps the Ask AI provider. It tries the selected model first, then the list. When Alibaba returns `AllocationQuota.FreeTierOnly` (mapped to `AIError.freeQuotaExhausted` from a 400/403/429 error body), it records the model in `QwenFreeQuotaLedger` (UserDefaults `ai.qwenFreeQuota.v1`) and sends the same request to the next model. An unavailable fallback model (`unsupportedModel`) is skipped for that request only. Any other error, or any error after text has streamed, is reported without retrying. The provider and key never change.
+
+The fallback is off by default. Alibaba only returns `FreeTierOnly` when **Free Quota Only** is on for that model in the console (Free Quota → Batch Enable → all models). Without it, Alibaba bills pay-as-you-go and no fallback happens. Test connection and the Debug screen use the selected model only.
 
 ## Implemented service boundary
 

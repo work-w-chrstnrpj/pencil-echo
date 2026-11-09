@@ -2,6 +2,17 @@
 
 All notable changes to Pencil Echo are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] — 2026-11-09
+
+### Added
+
+- **Qwen free quota fallback:** with Qwen · Singapore selected, Ask AI can move to the next vision model when Alibaba reports that a model's free quota is used up (`AllocationQuota.FreeTierOnly`). It retries the same request with the same key, remembers which models are used up, and never retries after an answer has started. Turn it on in AI Settings → Free quota. It's off by default and needs **Free Quota Only** turned on for all models in the Model Studio console, so a used-up model is never billed.
+- **More Qwen vision models** in the suggestions: the `qwen3-vl-plus`, `qwen3-vl-flash`, `qwen-vl-max` and `qwen-vl-plus` snapshots and aliases, and the open-weight `qwen3-vl-*-instruct` models (18 in total).
+
+### Changed
+
+- OpenAI-compatible providers now read Alibaba's used-up free quota code from HTTP 400, 403 and 429 error bodies. Other 403 and 429 responses are reported as before, with no provider text shown.
+
 ## [0.1.0] — 2026-11-05
 
 First public release. An early preview: simulator-tested, with hands-on Apple Pencil, VoiceOver and real-provider checks still open (see "Known limitations").

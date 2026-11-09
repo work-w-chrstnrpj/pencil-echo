@@ -122,6 +122,7 @@ struct ChatStreamAccumulator {
         case "invalid_api_key", "invalidapikey", "authentication_error": return .invalidCredentials
         case "model_not_found", "modelnotfound", "unsupported_model": return .unsupportedModel
         case "rate_limit_exceeded", "throttling", "rate_limit_error": return .rateLimited
+        case "allocationquota.freetieronly": return .freeQuotaExhausted
         default: return fallback
         }
     }

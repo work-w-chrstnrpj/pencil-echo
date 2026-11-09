@@ -124,7 +124,7 @@ final class AskAIController {
         guard let preset = try? settings.resolvedPreset(for: settings.selectedPresetID) else {
             return (UnconfiguredProvider(), model)
         }
-        return (ProviderFactory.make(preset), model)
+        return (QwenFreeQuotaProvider.wrap(ProviderFactory.make(preset), presetID: preset.id), model)
     }
 
     nonisolated static func configuredBlockedReason() -> String? {

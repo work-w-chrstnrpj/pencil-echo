@@ -6,7 +6,7 @@ Pencil Echo is written in Swift with SwiftUI, UIKit and PencilKit for iPadOS 27.
 
 > Based on [PenEcho](https://github.com/penecho/penecho) (AGPL-3.0-only). Pencil Echo is an independent project, not an official PenEcho release.
 
-## Features (v0.1.0)
+## Features (v0.1.1)
 
 - **Canvas and A4 notebooks** with every PencilKit tool, page styles and autosave.
 - **Ask AI and Auto answer:** pause after writing and the answer appears beside your newest ink. Circle, arrow and "why?" gestures, and context around the new ink.
@@ -14,6 +14,7 @@ Pencil Echo is written in Swift with SwiftUI, UIKit and PencilKit for iPadOS 27.
 - **Agent chat** about a selection or the visible page, with answers placed as drafts you accept or discard.
 - **Claude Code on your Mac** can see a shared page and place answers over your home Wi-Fi (encrypted, paired, foreground only). See [MCP](docs/api/mcp.md).
 - **Providers:** Qwen, OpenAI, Anthropic, OpenRouter, Gemini, Cerebras, Groq, Hugging Face, Mistral, NVIDIA and custom OpenAI-compatible endpoints. Keys stay in the iPad's Keychain.
+- **Qwen free quota:** on Qwen · Singapore, Ask AI can work through the free quota of each Qwen vision model in turn. See [providers](docs/api/providers.md#qwen-free-quota-fallback).
 - **Library** with Recent, Favorites, search, sort, grid and list.
 - **iPadOS 26+ design:** one Liquid Glass command bar, a floating selection bar, inspectors, and a Liquid Glass app icon.
 

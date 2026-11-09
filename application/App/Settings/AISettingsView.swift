@@ -16,13 +16,36 @@ final class AISettingsModel {
 
     private let defaults: UserDefaults
     private let keys: KeychainStore
+    private let freeQuota: QwenFreeQuotaLedger
+    private(set) var freeQuotaState: QwenFreeQuotaState
 
     init(defaults: UserDefaults = .standard, keys: KeychainStore = KeychainStore()) {
         self.defaults = defaults
         self.keys = keys
+        freeQuota = QwenFreeQuotaLedger(defaults: defaults)
+        freeQuotaState = freeQuota.state
         settings = AISettings.load(defaults)
         refreshKeyState()
     }
+
+    // MARK: Free quota (Qwen · Singapore)
+
+    var offersFreeQuota: Bool { presetID == QwenPresets.freeQuotaPresetID }
+    var freeQuotaRemainingModels: Int {
+        QwenPresets.freeQuotaVisionModels.filter { freeQuotaState.exhausted[$0] == nil }.count
+    }
+
+    func setFreeQuotaFallback(_ on: Bool) {
+        freeQuota.update { $0.enabled = on }
+        freeQuotaState = freeQuota.state
+    }
+
+    func resetFreeQuotaList() {
+        freeQuota.update { $0.exhausted = [:] }
+        freeQuotaState = freeQuota.state
+    }
+
+    func refreshFreeQuota() { freeQuotaState = freeQuota.state }
 
     var presetID: String { settings.selectedPresetID }
     var preset: ProviderPreset? { ProviderCatalog.preset(presetID) }
@@ -179,6 +202,7 @@ struct AISettingsView: View {
         NavigationStack {
             Form {
                 providerSection
+                if model.offersFreeQuota { freeQuotaSection }
                 keySection
                 endpointSection
                 savedConnectionsSection
@@ -248,6 +272,24 @@ struct AISettingsView: View {
                  ? "Ask AI uses only this provider and never retries with another. Image support for this model comes from the provider's documentation."
                  : "Ask AI uses only this provider and never retries with another. Turn on Reads images only if the provider says this model accepts images: handwriting is sent as an image.")
         }
+    }
+
+    private var freeQuotaSection: some View {
+        Section {
+            Toggle(isOn: Binding(get: { model.freeQuotaState.enabled }, set: { model.setFreeQuotaFallback($0) })) {
+                Label("Use free quota across vision models", systemImage: "gift")
+            }
+            LabeledContent("Models with quota left",
+                           value: "\(model.freeQuotaRemainingModels) of \(QwenPresets.freeQuotaVisionModels.count)")
+            if !model.freeQuotaState.exhausted.isEmpty {
+                Button("Reset used-up list") { model.resetFreeQuotaList() }
+            }
+        } header: {
+            Text("Free quota")
+        } footer: {
+            Text("Turn on Free Quota Only for all models in the Model Studio console first (Free Quota, Batch Enable). When Alibaba says a model's free quota is used up, Ask AI marks it and sends the same request to the next vision model on this key. Without Free Quota Only, Alibaba bills instead and the next model is never tried.")
+        }
+        .onAppear { model.refreshFreeQuota() }
     }
 
     private var keySection: some View {

@@ -65,6 +65,8 @@ enum AIError: Error, Equatable, Sendable, LocalizedError {
     case timeout, network, cancelled, invalidOutput, safetyBlocked
     case server(Int)
     case invalidRequest, imageTooLarge, keychain(Int32)
+    /// Alibaba "Free Quota Only": this model's free quota is used up, nothing was billed.
+    case freeQuotaExhausted
 
     var errorDescription: String? {
         switch self {
@@ -81,6 +83,7 @@ enum AIError: Error, Equatable, Sendable, LocalizedError {
         case .invalidRequest: "The request or endpoint is invalid."
         case .imageTooLarge: "The image exceeds this model's local upload limit."
         case .keychain: "The key could not be accessed securely on this device."
+        case .freeQuotaExhausted: "The free quota is used up for every available vision model. Nothing was billed."
         }
     }
 

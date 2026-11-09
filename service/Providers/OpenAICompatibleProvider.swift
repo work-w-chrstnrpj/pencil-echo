@@ -38,15 +38,16 @@ struct OpenAICompatibleProvider: AIProvider {
                             guard status == nil else { throw AIError.invalidOutput }
                             status = code
                             if code != 200 {
-                                // Only 400 needs a bounded safe-code lookup for unsupported models.
-                                if code != 400 { throw AIError.http(code) }
+                                // 400 needs a bounded safe-code lookup for unsupported models;
+                                // 403 and 429 only for Alibaba's used-up free quota.
+                                if !Self.readsErrorBody(code) { throw AIError.http(code) }
                             } else {
                                 guard contentType.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "text/event-stream" else { throw AIError.invalidOutput }
                             }
                         case .data(let data):
                             guard let status else { throw AIError.invalidOutput }
-                            if status == 400 {
-                                guard errorBody.count + data.count <= 16 * 1_024 else { throw AIError.server(400) }
+                            if Self.readsErrorBody(status) {
+                                guard errorBody.count + data.count <= 16 * 1_024 else { throw AIError.http(status) }
                                 errorBody.append(data)
                             } else {
                                 for value in try parser.feed(data) {
@@ -56,9 +57,10 @@ struct OpenAICompatibleProvider: AIProvider {
                         }
                         if accumulator.done { break }
                     }
-                    if status == 400 {
+                    if let status, Self.readsErrorBody(status) {
                         let root = (try? JSONSerialization.jsonObject(with: errorBody)) as? [String: Any] ?? [:]
-                        throw ChatStreamAccumulator.payloadError(root, fallback: .server(400))
+                        let mapped = ChatStreamAccumulator.payloadError(root, fallback: AIError.http(status))
+                        throw status == 400 || mapped == .freeQuotaExhausted ? mapped : AIError.http(status)
                     }
                     guard status == 200 else { throw AIError.network }
                     for value in try parser.finish() {
@@ -76,6 +78,8 @@ struct OpenAICompatibleProvider: AIProvider {
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
+
+    static func readsErrorBody(_ status: Int) -> Bool { [400, 403, 429].contains(status) }
 
     /// Capability and size gates precede credential access and transport creation.
     func makeRequest(_ request: AIRequest) throws -> URLRequest {
