@@ -146,7 +146,7 @@ Ticket 004 verification (2026-11-03): Debug/Release simulator builds passed; 14 
 
 The scaffold tests are three intentional placeholders for logical groups, with no feature assertions. The Debug-only spike tests exercise geometry, transactions and deterministic lasso-handler states; they do not establish touch/Pencil hardware behavior. Root npm tests exercise template tooling, not app behavior.
 
-- `node bin/create-preset.mjs validate`: context structural validation only. Currently fails on an existing obsolete `wiki/` reference inside excluded `inspiration/`.
+- `node bin/create-preset.mjs validate`: context structural validation only.
 - Real-provider/MCP/device acceptance: not run.
 
 Do not claim implementation from planned docs or infer device acceptance from builds. Keep provider integrations, MCP clients and hardware claims independently verified. Preserve owner documents on installation. No background MCP availability guarantee. Read `docs/decisions.md` before selecting implementation scope.
