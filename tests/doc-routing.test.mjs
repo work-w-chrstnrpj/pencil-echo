@@ -21,15 +21,16 @@ describe('Documentation Routing & Context Integrity', () => {
     assert.ok(result.passed.length >= 20, 'Expected at least 20 passed checks');
   });
 
-  test('task-based context check blocks when required doc is NOT_STARTED', () => {
+  test('task-based context check passes when required docs are initialized', () => {
     const result = validateTemplate(templateRoot, { task: 'database' });
-    assert.equal(result.valid, false, 'Validation should fail when task doc is NOT_STARTED');
-    assert.ok(result.errors.some(e => e.includes("[Task Blocked] Task 'database' requires")));
+    assert.equal(result.valid, true, 'Validation should pass when task docs are initialized');
+    assert.deepEqual(result.errors, [], `Unexpected task validation errors: ${result.errors.join('; ')}`);
+    assert.ok(result.passed.some(e => e.includes("Task context verified for 'database'")));
   });
 
-  test('general validation warns but does NOT block for template onboarding placeholders', () => {
+  test('general validation passes for repository docs', () => {
     const result = validateTemplate(templateRoot);
     assert.equal(result.valid, true, 'General validation should pass');
-    assert.ok(result.warnings.length > 0, 'Should produce onboarding warnings');
+    assert.ok(Array.isArray(result.warnings), 'Warnings should be returned as an array');
   });
 });

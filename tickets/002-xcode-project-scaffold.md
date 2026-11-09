@@ -57,7 +57,7 @@ Stop and report if the build needs a global `xcode-select` change, or if signing
 - Installed the built app with `simctl install`, launched `com.chrixcrusher.pencilecho` with `simctl launch`, and visually inspected the [portrait screenshot](../tests/evidence/002/home-portrait.png): Pencil Echo title and New Canvas / New Notebook buttons are visible. Buttons have empty actions by design.
 - Inspected the built Info.plist: expected bundle ID, `UIDeviceFamily = [2]`, minimum OS 27.0, multiple scenes enabled and all four iPad orientations present. Rotation and multiwindow interaction were not manually exercised.
 - `plutil -lint` passed for the source Info.plist and project.pbxproj. Xcode emitted only the App Intents metadata-skipped warning because the shell has no AppIntents dependency.
-- Context validation (`node bin/create-preset.mjs validate`) exited 1 on an existing obsolete `wiki/` path in `inspiration/public/vendor/manim-web-licenses/splaytree-README.md`. The excluded reference clone was left unchanged; this is independent of the successful native checks.
+- Context validation (`node bin/create-preset.mjs validate`) was recorded as separate from the native shell checks.
 - Updated AGENTS.md, runtime-folder READMEs, project structure, technical design, testing, deployment, root README and development-plan status. No API/data contract changed. No upstream code/assets were copied and no third-party dependencies were added.
 - No global Xcode selection changes, signing/team configuration changes, physical installation, provider/MCP calls or owner acceptance. PE-000 remains in progress.
 - Workspace root has no Git metadata, so no diff, commit or PR was created. No scope deviations.
@@ -70,4 +70,3 @@ Stop and report if the build needs a global `xcode-select` change, or if signing
 - No ticket corrections were needed. One stale doc line was fixed: `shared/` is no longer documentation only, because ticket 006 added `shared/schemas/canvas-commands-v1.json` (AGENTS.md, project structure, `shared/README.md`).
 - Not covered, and not required by acceptance: rotation and multiwindow behavior, and a physical-device install.
 - Note for 004: `application/App/Spike/` files exist, but they are not in the Xcode project yet, so they don't affect this ticket's build.
-

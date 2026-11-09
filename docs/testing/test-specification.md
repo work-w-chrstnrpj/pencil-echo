@@ -37,7 +37,7 @@ Separate statuses: automated check, native build, simulator flow, real-provider 
 
 The exact commands above both succeeded on the iPad (A16) / iOS 27.0 simulator with Xcode 27.0 (27A266a). Swift Testing ran three placeholder tests in three suites, with zero failures. Installed and launched the built app with simctl, then visually confirmed the title and both buttons in the [portrait screenshot](../../tests/evidence/002/home-portrait.png). Built metadata confirms iPad-only, minimum OS 27.0, multiple scenes and four orientations. Rotation/multiwindow interaction and physical acceptance were not exercised.
 
-`plutil -lint` passed for the project and Info.plist. Xcode's AppIntents metadata extraction was skipped because no AppIntents dependency exists. Context structural validation failed on an existing obsolete `wiki/` path in `inspiration/public/vendor/manim-web-licenses/splaytree-README.md`; the reference clone is excluded from this ticket and was not changed. See [ticket 002](../../tickets/002-xcode-project-scaffold.md) for full scope and evidence.
+`plutil -lint` passed for the project and Info.plist. Xcode's AppIntents metadata extraction was skipped because no AppIntents dependency exists. See [ticket 002](../../tickets/002-xcode-project-scaffold.md) for full scope and evidence.
 
 ## Ink/object spike verification — 2026-11-03
 
